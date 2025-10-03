@@ -2,7 +2,7 @@
 
 #=================================================
 #	System Required: Debian/Ubuntu
-#	Description: One-click script to install a standalone Cloud Manager Telegram Bot (with custom snatch delay)
+#	Description: One-click script to install a standalone Cloud Manager Telegram Bot
 #	Author: Gemini
 #=================================================
 
@@ -16,9 +16,9 @@ NC='\033[0m' # No Color
 
 # --- Check for root privileges ---
 if [ "$(id -u)" != "0" ]; then
-    echo -e "${RED}错误：此脚本必须以 root 权限运行。${NC}"
-    echo -e "${YELLOW}请尝试使用 'sudo ./install_tgbot.sh'${NC}"
-    exit 1
+   echo -e "${RED}错误：此脚本必须以 root 权限运行。${NC}"
+   echo -e "${YELLOW}请尝试使用 'sudo ./install_tgbot.sh'${NC}"
+   exit 1
 fi
 
 echo -e "${GREEN}=====================================================${NC}"
@@ -40,21 +40,19 @@ apt-get install -y python3 python3-pip python3-venv
 # --- 3. 创建安装目录和虚拟环境 ---
 INSTALL_DIR="/opt/tgbot"
 echo -e "\n${GREEN}将在 ${INSTALL_DIR} 目录中安装机器人...${NC}"
-rm -rf $INSTALL_DIR # 清理旧目录以确保全新安装
 mkdir -p $INSTALL_DIR
 echo -e "${GREEN}正在创建 Python 虚拟环境...${NC}"
 python3 -m venv ${INSTALL_DIR}/venv
 
 # --- 4. 生成 bot.py 文件 ---
 echo -e "${GREEN}正在根据您的输入生成 bot.py 配置文件...${NC}"
-# 使用 'EOF' 来防止shell展开$等特殊字符
-cat << 'EOF' > ${INSTALL_DIR}/bot.py
+cat << EOF > ${INSTALL_DIR}/bot.py
 import asyncio
 import httpx
 import logging
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
@@ -99,93 +97,57 @@ def authorized(func):
         return await func(update, context, *args, **kwargs)
     return wrapper
 
+async def build_param_selection_menu(form_data: dict, action_type: str):
+    text = f"⚙️ *请配置实例参数*\n"
+    text += f"*{'抢占任务' if action_type == 'start_snatch' else '创建任务'}*\n\n"
+    text += f"实例名称: \`{form_data.get('display_name_prefix', 'N/A')}\`\n"
+    text += f"实例规格: \`{form_data.get('shape', 'N/A')}\`\n"
+    shape = form_data.get('shape')
+    is_flex = "Flex" in shape if shape else False
+    keyboard = []
+    all_params_selected = True
+    if is_flex:
+        ocpu_val = form_data.get('ocpus')
+        text += f"OCPU: \`{ocpu_val or '尚未选择'}\`\n"
+        options = {"1": "1 OCPU", "2": "2 OCPU", "3": "3 OCPU", "4": "4 OCPU"}
+        row = [InlineKeyboardButton(f"{'✅ ' if str(ocpu_val) == k else ''}{v}", callback_data=f"form_param:ocpus:{k}") for k, v in options.items()]
+        keyboard.append(row)
+        if not ocpu_val: all_params_selected = False
+    if is_flex:
+        mem_val = form_data.get('memory_in_gbs')
+        text += f"内存: \`{f'{mem_val} GB' if mem_val else '尚未选择'}\`\n"
+        options = {"6": "6 GB", "12": "12 GB", "18": "18 GB", "24": "24 GB"}
+        row = [InlineKeyboardButton(f"{'✅ ' if str(mem_val) == k else ''}{v}", callback_data=f"form_param:memory_in_gbs:{k}") for k, v in options.items()]
+        keyboard.append(row)
+        if not mem_val: all_params_selected = False
+    disk_val = form_data.get('boot_volume_size')
+    text += f"磁盘大小: \`{f'{disk_val} GB' if disk_val else '尚未选择'}\`\n"
+    options = {"50": "50 GB", "100": "100 GB", "150": "150 GB", "200": "200 GB"}
+    row = [InlineKeyboardButton(f"{'✅ ' if str(disk_val) == k else ''}{v}", callback_data=f"form_param:boot_volume_size:{k}") for k, v in options.items()]
+    keyboard.append(row)
+    if not disk_val: all_params_selected = False
+    if action_type == 'start_snatch':
+        min_delay = form_data.get('min_delay', '45')
+        max_delay = form_data.get('max_delay', '90')
+        form_data['min_delay'] = min_delay
+        form_data['max_delay'] = max_delay
+        text += f"重试间隔: \`{min_delay}-{max_delay} 秒\`"
+    if all_params_selected:
+        keyboard.append([InlineKeyboardButton("🚀 确认提交", callback_data="form_submit")])
+    keyboard.append([InlineKeyboardButton("❌ 取消操作", callback_data="back:main")])
+    return text, InlineKeyboardMarkup(keyboard)
+
 async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, task_id: str, task_name: str):
     max_retries, retries = 120, 0
     while retries < max_retries:
         await asyncio.sleep(5)
         result = await api_request("GET", f"task-status/{task_id}")
         if result and result.get("status") in ["success", "failure"]:
-            status_icon = "✅" if result.get("status") == "success" else "❌"
-            final_message = f"🔔 *任务完成通知* {status_icon}\n\n*任务名称*: `{task_name}`\n\n*结果*:\n`{result.get('result')}`"
+            final_message = f"🔔 *任务完成通知*\n\n*任务名称*: \`{task_name}\`\n\n*结果*:\n\`{result.get('result')}\`"
             await context.bot.send_message(chat_id=chat_id, text=final_message, parse_mode=ParseMode.MARKDOWN)
             return
         retries += 1
-    await context.bot.send_message(chat_id=chat_id, text=f"🔔 *任务超时*\n\n任务 `{task_name}` 轮询超时（超过10分钟），请在网页端查看最终结果。")
-
-# --- MODIFIED: 新增用于构建最低延迟选择的菜单 ---
-async def build_min_delay_menu(context: ContextTypes.DEFAULT_TYPE):
-    delay_options = [15, 30, 45, 60, 90]
-    keyboard = [
-        [InlineKeyboardButton(f"{s}秒", callback_data=f"form_param:set_min_delay:{s}") for s in delay_options[:3]],
-        [InlineKeyboardButton(f"{s}秒", callback_data=f"form_param:set_min_delay:{s}") for s in delay_options[3:]],
-        [InlineKeyboardButton("⬅️ 返回参数配置", callback_data="form_back_params")]
-    ]
-    text = "请选择 *最低* 抢占延迟:"
-    return text, InlineKeyboardMarkup(keyboard)
-
-# --- MODIFIED: 新增用于构建最高延迟选择的菜单 ---
-async def build_max_delay_menu(context: ContextTypes.DEFAULT_TYPE):
-    min_delay = context.user_data['form_data'].get('min_delay', 15)
-    delay_options = [15, 30, 45, 60, 90]
-    valid_options = [s for s in delay_options if s >= min_delay]
-    keyboard = []
-    for i in range(0, len(valid_options), 3):
-        row = [InlineKeyboardButton(f"{s}秒", callback_data=f"form_param:set_max_delay:{s}") for s in valid_options[i:i+3]]
-        keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("⬅️ 返回上一步", callback_data="form_select_delay")])
-    text = f"最低延迟已选 *{min_delay}* 秒。\n请选择 *最高* 抢占延迟:"
-    return text, InlineKeyboardMarkup(keyboard)
-
-# --- MODIFIED: 移植了新的抢占延迟逻辑到旧的参数菜单函数中 ---
-async def build_param_selection_menu(form_data: dict, action_type: str, alias: str):
-    text = f"⚙️ *请配置实例参数*\n"
-    text += f"*{'抢占任务' if action_type == 'start_snatch' else '创建任务'}*\n\n"
-    text += f"实例名称: `{form_data.get('display_name_prefix', 'N/A')}`\n"
-    text += f"实例规格: `{form_data.get('shape', 'N/A')}`\n"
-    shape = form_data.get('shape')
-    is_flex = "Flex" in shape if shape else False
-    keyboard = []
-    all_params_selected = True
-
-    # 保留原有的创建实例逻辑
-    if action_type == 'start_create':
-        if is_flex:
-            ocpu_val = form_data.get('ocpus')
-            text += f"OCPU: `{ocpu_val or '尚未选择'}`\n"
-            options = {"1": "1 OCPU", "2": "2 OCPU", "3": "3 OCPU", "4": "4 OCPU"}
-            row = [InlineKeyboardButton(f"{'✅ ' if str(ocpu_val) == k else ''}{v}", callback_data=f"form_param:ocpus:{k}") for k, v in options.items()]
-            keyboard.append(row)
-            if not ocpu_val: all_params_selected = False
-        
-        if is_flex:
-            mem_val = form_data.get('memory_in_gbs')
-            text += f"内存: `{f'{mem_val} GB' if mem_val else '尚未选择'}`\n"
-            options = {"6": "6 GB", "12": "12 GB", "18": "18 GB", "24": "24 GB"}
-            row = [InlineKeyboardButton(f"{'✅ ' if str(mem_val) == k else ''}{v}", callback_data=f"form_param:memory_in_gbs:{k}") for k, v in options.items()]
-            keyboard.append(row)
-            if not mem_val: all_params_selected = False
-
-        disk_val = form_data.get('boot_volume_size')
-        text += f"磁盘大小: `{f'{disk_val} GB' if disk_val else '尚未选择'}`\n"
-        options = {"50": "50 GB", "100": "100 GB", "150": "150 GB", "200": "200 GB"}
-        row = [InlineKeyboardButton(f"{'✅ ' if str(disk_val) == k else ''}{v}", callback_data=f"form_param:boot_volume_size:{k}") for k, v in options.items()]
-        keyboard.append(row)
-        if not disk_val: all_params_selected = False
-    
-    # 仅在抢占实例时使用新的延迟选择逻辑
-    if action_type == 'start_snatch':
-        form_data.setdefault('min_delay', 15)
-        form_data.setdefault('max_delay', 90)
-        min_d = form_data['min_delay']
-        max_d = form_data['max_delay']
-        text += f"抢占延迟: `{min_d}` - `{max_d}` 秒\n"
-        keyboard.append([InlineKeyboardButton(f"⏰ 抢占延迟: {min_d}s - {max_d}s (点击修改)", callback_data="form_select_delay")])
-
-    if all_params_selected:
-        keyboard.append([InlineKeyboardButton("🚀 确认提交", callback_data="form_submit")])
-    
-    keyboard.append([InlineKeyboardButton("❌ 取消操作", callback_data=f"back:account:{alias}")])
-    return text, InlineKeyboardMarkup(keyboard)
+    await context.bot.send_message(chat_id=chat_id, text=f"🔔 *任务超时*\n\n任务 \`{task_name}\` 轮询超时（超过10分钟），请在网页端查看最终结果。")
 
 async def build_main_menu():
     profiles = await api_request("GET", "profiles")
@@ -253,20 +215,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    
-    if query.data == "form_select_delay":
-        text, reply_markup = await build_min_delay_menu(context)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        return
-        
-    if query.data == "form_back_params":
-        alias = context.user_data.get('alias')
-        action_type = context.user_data.get('action_in_progress')
-        form_data = context.user_data.get('form_data')
-        text, reply_markup = await build_param_selection_menu(form_data, action_type, alias)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        return
-
     parts = query.data.split(":")
     command = parts[0]
     if command == "account":
@@ -308,7 +256,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if result and result.get("task_id"):
             task_id = result.get("task_id")
             task_name = f"{action} on {selected_instance['display_name']}"
-            text = f"✅ 命令发送成功！\n任务ID: `{task_id}`\n\n机器人将在后台为您监控任务，完成后会主动通知您。"
+            text = f"✅ 命令发送成功！\n任务ID: \`{task_id}\`\n\n机器人将在后台为您监控任务，完成后会主动通知您。"
             asyncio.create_task(poll_task_status(update.effective_chat.id, context, task_id, task_name))
         else:
             text = f"❌ 命令发送失败: {result.get('error', '未知错误')}"
@@ -332,7 +280,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 status_icon = ""
                 if task_status == 'completed':
                     status_icon = "✅" if task.get("status") == "success" else "❌"
-                text += f"*{task.get('name')}* {status_icon}:\n`{task.get('result', '无结果')}`\n\n"
+                text += f"*{task.get('name')}* {status_icon}:\n\`{task.get('result', '无结果')}\`\n\n"
         await query.edit_message_text(text, reply_markup=back_keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     elif command == "back":
         target = parts[1]
@@ -360,7 +308,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         context.user_data['next_step'] = 'get_shape'
         keyboard = [[InlineKeyboardButton("ARM (VM.Standard.A1.Flex)", callback_data="form_shape:VM.Standard.A1.Flex")],
                     [InlineKeyboardButton("AMD (VM.Standard.E2.1.Micro)", callback_data="form_shape:VM.Standard.E2.1.Micro")]]
-        await query.edit_message_text(f"✅ 名称已自动生成: `{auto_name}`\n请选择实例规格 (Shape):",
+        await query.edit_message_text(f"✅ 名称已自动生成: \`{auto_name}\`\n请选择实例规格 (Shape):",
                                       reply_markup=InlineKeyboardMarkup(keyboard),
                                       parse_mode=ParseMode.MARKDOWN)
 
@@ -372,8 +320,7 @@ async def handle_form_shape_selection(update: Update, context: ContextTypes.DEFA
     context.user_data['form_data']['shape'] = shape
     context.user_data['next_step'] = 'param_selection'
     action_type = context.user_data['action_in_progress']
-    alias = context.user_data.get('alias')
-    text, reply_markup = await build_param_selection_menu(context.user_data['form_data'], action_type, alias)
+    text, reply_markup = await build_param_selection_menu(context.user_data['form_data'], action_type)
     await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_param_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -382,33 +329,16 @@ async def handle_param_selection(update: Update, context: ContextTypes.DEFAULT_T
     command = query.data
     form_data = context.user_data.get('form_data', {})
     action_type = context.user_data.get('action_in_progress')
-    alias = context.user_data.get('alias')
     if command == "form_submit":
         form_data.setdefault('os_name_version', 'Canonical Ubuntu-22.04')
         await query.edit_message_text("✅ 所有参数已确认，正在提交任务...", parse_mode=ParseMode.MARKDOWN)
         await submit_form(update, context, form_data)
         return
-    
     parts = command.split(":")
-    param_type = parts[1]
-
-    if param_type == "set_min_delay":
-        min_delay_value = int(parts[2])
-        form_data['min_delay'] = min_delay_value
-        if form_data.get('max_delay', 0) < min_delay_value:
-             form_data['max_delay'] = min_delay_value
-        context.user_data['form_data'] = form_data
-        text, reply_markup = await build_max_delay_menu(context)
-    elif param_type == "set_max_delay":
-        form_data['max_delay'] = int(parts[2])
-        context.user_data['form_data'] = form_data
-        text, reply_markup = await build_param_selection_menu(form_data, action_type, alias)
-    else: # Fallback for other param types from original script
-        key, value = parts[1], parts[2]
-        form_data[key] = value
-        context.user_data['form_data'] = form_data
-        text, reply_markup = await build_param_selection_menu(form_data, action_type, alias)
-
+    key, value = parts[1], parts[2]
+    form_data[key] = value
+    context.user_data['form_data'] = form_data
+    text, reply_markup = await build_param_selection_menu(form_data, action_type)
     try:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     except BadRequest as e:
@@ -430,14 +360,14 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
                 else:
                     payload[key] = int(payload[key])
             except (ValueError, TypeError):
-                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ 参数 {key} 的值 `{payload[key]}` 无效，必须是数字。")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ 参数 {key} 的值 \`{payload[key]}\` 无效，必须是数字。")
                 return
     payload.setdefault('os_name_version', 'Canonical Ubuntu-22.04')
     endpoint = "create-instance" if action_type == "start_create" else "snatch-instance"
     message_to_send = (f"正在提交 *{action_type}* 任务...\n"
-                       f"账户: `{alias}`\n"
-                       f"名称: `{payload.get('display_name_prefix')}`\n"
-                       f"规格: `{payload.get('shape')}`")
+                       f"账户: \`{alias}\`\n"
+                       f"名称: \`{payload.get('display_name_prefix')}\`\n"
+                       f"规格: \`{payload.get('shape')}\`")
     if update.callback_query:
         await update.callback_query.message.reply_text(message_to_send, parse_mode=ParseMode.MARKDOWN)
     else:
@@ -446,7 +376,7 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
     if result and result.get("task_id"):
         task_id = result.get("task_id")
         task_name = payload.get('display_name_prefix', 'N/A')
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ 任务提交成功！\n任务ID: `{task_id}`")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ 任务提交成功！\n任务ID: \`{task_id}\`")
         asyncio.create_task(poll_task_status(update.effective_chat.id, context, task_id, task_name))
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ 任务提交失败: {result.get('error', '未知错误')}")
@@ -461,7 +391,7 @@ async def post_init(application: Application):
 def main() -> None:
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CallbackQueryHandler(button_callback_handler))
+    application.add_handler(CallbackQueryHandler(button_callback_handler, pattern=r"^(?!form_).*"))
     application.add_handler(CallbackQueryHandler(handle_form_shape_selection, pattern=r"^form_shape:.*"))
     application.add_handler(CallbackQueryHandler(handle_param_selection, pattern=r"^form_param:.*|^form_submit$"))
     logger.info("Bot 启动成功！")
@@ -472,10 +402,10 @@ if __name__ == "__main__":
 EOF
 
 # --- 5. 安装 Python 依赖 ---
-echo -e "${GREEN}正在虚拟环境中安装所需的 Python 库 (python-telegram-bot, httpx)...${NC}"
+echo -e "${GREEN}正在虚拟环境中安装所需的 Python 库...${NC}"
 # 激活虚拟环境并安装库
 source ${INSTALL_DIR}/venv/bin/activate
-pip install python-telegram-bot httpx > /dev/null
+pip install python-telegram-bot httpx
 
 # --- 6. 创建 systemd 服务文件 ---
 echo -e "${GREEN}正在创建并配置 systemd 服务...${NC}"
