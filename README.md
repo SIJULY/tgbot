@@ -39,23 +39,17 @@
 
 ## 📸 界面截图
 
-<img width="613" height="251" alt="image" src="https://github.com/user-attachments/assets/c35e39ec-f5f9-400b-87b6-8a6cc6782b1d" />
-
-<img width="486" height="219" alt="image" src="https://github.com/user-attachments/assets/2047881f-1caa-4e75-a704-5823183fc2f6" />
-
-<img width="561" height="258" alt="image" src="https://github.com/user-attachments/assets/62acfcdd-b53e-47fe-ba77-f8ce7ea8e077" />
-
-
-<img width="311" height="411" alt="image" src="https://github.com/user-attachments/assets/f58fc9de-cf9d-4615-b6ad-0ab59e807c2b" />
-
-
 
 
 | 主菜单 (账户选择) | 账户功能菜单 |
 | :---: | :---: |
-| ![主菜单](path/to/your/main_menu.jpg) | ![账户菜单](path/to/your/account_menu.jpg) |
+| ![主菜单](<img width="599" height="244" alt="image" src="https://github.com/user-attachments/assets/05c89275-328d-4c5d-8dee-5ea0bda2f65d" />
+) | ![账户菜单](<img width="614" height="286" alt="image" src="https://github.com/user-attachments/assets/42b3c0cb-8049-4f57-bdc0-0a4f6d8f4359" />
+) |
 | **实例操作菜单** | **参数选择界面** |
-| ![实例操作](path/to/your/instance_actions.jpg) | ![参数选择](path/to/your/param_selection.jpg) |
+| ![实例操作](<img width="614" height="246" alt="image" src="https://github.com/user-attachments/assets/c16f7f81-8492-4573-b7a3-fb5450eba33e" />
+) | ![参数选择](<img width="314" height="376" alt="image" src="https://github.com/user-attachments/assets/0a3891d9-9b75-49c1-8afb-78884cca504c" />
+) |
 
 ## 🚀 一键安装
 
