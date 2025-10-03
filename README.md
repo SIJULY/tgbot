@@ -68,7 +68,7 @@ bash <(curl -sL https://raw.githubusercontent.com/SIJULY/tgbot/main/install_tgbo
 
 在执行一键安装脚本时，您需要提供以下四项信息：
 
-1.  `PANEL_URL`: 您的 Cloud Manager 面板的访问地址 (例如: `https://cm.sijuly.nyc.mn`)。
+1.  `PANEL_URL`: 您的 Cloud Manager 面板的访问地址 (例如: `https://xxx.com`)。
 2.  `PANEL_API_KEY`: 在您的面板“TG & API 设置”中获取的“TG Bot 助手 API 密钥”。
 3.  `BOT_TOKEN`: 您从 BotFather 获取的 Telegram 机器人 TOKEN。
 4.  `AUTHORIZED_USER_IDS`: 您的个人 Telegram 用户 ID (纯数字)，用于授权。
