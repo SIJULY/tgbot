@@ -43,11 +43,10 @@
 
 | 主菜单 (账户选择) | 账户功能菜单 |
 | :---: | :---: |
-| <img width="599" height="244" alt="image" src="https://github.com/user-attachments/assets/05c89275-328d-4c5d-8dee-5ea0bda2f65d" />
-| <img width="614" height="286" alt="image" src="https://github.com/user-attachments/assets/42b3c0cb-8049-4f57-bdc0-0a4f6d8f4359" />
+| <img width="599" height="244" alt="image" src="https://github.com/user-attachments/assets/05c89275-328d-4c5d-8dee-5ea0bda2f65d" />| <img width="614" height="286" alt="image" src="https://github.com/user-attachments/assets/42b3c0cb-8049-4f57-bdc0-0a4f6d8f4359" />|
 | **实例操作菜单** | **参数选择界面** |
-| <img width="614" height="246" alt="image" src="https://github.com/user-attachments/assets/c16f7f81-8492-4573-b7a3-fb5450eba33e" />
-| <img width="314" height="376" alt="image" src="https://github.com/user-attachments/assets/0a3891d9-9b75-49c1-8afb-78884cca504c" />
+| <img width="614" height="246" alt="image" src="https://github.com/user-attachments/assets/c16f7f81-8492-4573-b7a3-fb5450eba33e" /> | <img width="314" height="376" alt="image" src="https://github.com/user-attachments/assets/0a3891d9-9b75-49c1-8afb-78884cca504c" /> |
+
 
 ## 🚀 一键安装
 
