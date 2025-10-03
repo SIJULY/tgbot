@@ -61,7 +61,7 @@
 本项目支持一键部署。只需在您的服务器上（推荐 Debian / Ubuntu 系统）运行以下单行命令，即可根据引导完成所有安装和配置。
 
 ```bash
-bash <(curl -sL [https://raw.githubusercontent.com/SIJULY/tgbot/main/install_tgbot.sh](https://raw.githubusercontent.com/SIJULY/tgbot/main/install_tgbot.sh))
+bash <(curl -sL https://raw.githubusercontent.com/SIJULY/tgbot/main/install_tgbot.sh)
 ```
 
 脚本将自动处理 Python 环境、程序文件、依赖库以及 `systemd` 后台服务。
