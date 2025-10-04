@@ -77,51 +77,57 @@ async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, tas
 
 # --- 菜单构建函数 ---
 
+# 这是您提供的、测试通过的新版本函数
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
     shape = form_data.get('shape')
     is_flex = shape and "Flex" in shape
     text = f"⚙️ *请配置实例参数*\n*{'抢占任务' if action_type == 'start_snatch' else '创建任务'}*\n\n"
     text += f"实例名称: `{form_data.get('display_name_prefix', 'N/A')}`\n"
-    text += f"实例规格: `{shape or '尚未选择'}`\n"
+    # 根据您的建议，这里只显示缩写，让消息体更简洁
+    text += f"实例规格: `{'ARM' if shape and 'A1.Flex' in shape else ('AMD' if shape else '尚未选择')}`\n"
+    
     keyboard = [create_title_bar("参数配置")]
-    keyboard.append([InlineKeyboardButton("───── 实例型号 ─────", callback_data="ignore")])
-    shape_buttons = [
-        InlineKeyboardButton(f"{'✅ ' if shape and 'A1.Flex' in shape else ''}ARM (A1.Flex)", callback_data="form_param:shape:VM.Standard.A1.Flex"),
-        InlineKeyboardButton(f"{'✅ ' if shape and 'E2.1.Micro' in shape else ''}AMD (E2.Micro)", callback_data="form_param:shape:VM.Standard.E2.1.Micro")
-    ]
-    keyboard.append(shape_buttons)
     all_params_selected = True
-    if not shape: all_params_selected = False
+    
     if is_flex:
         ocpu_val = form_data.get('ocpus')
         text += f"OCPU: `{ocpu_val or '尚未选择'}`\n"
-        keyboard.append([InlineKeyboardButton("──── 实例CPU规格 ────", callback_data="ignore")])
+        keyboard.append([InlineKeyboardButton("─── 实例CPU规格 ───", callback_data="ignore")])
         options = {"1": "1 OCPU", "2": "2 OCPU", "3": "3 OCPU", "4": "4 OCPU"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(ocpu_val) == k else ''}{v}", callback_data=f"form_param:ocpus:{k}") for k, v in options.items()]
+        # 修改：从两行双列改为一行四列
         keyboard.append(option_buttons)
         if not ocpu_val: all_params_selected = False
+
     if is_flex:
         mem_val = form_data.get('memory_in_gbs')
         text += f"内存: `{f'{mem_val} GB' if mem_val else '尚未选择'}`\n"
         keyboard.append([InlineKeyboardButton("─── 实例运行内存规格 ───", callback_data="ignore")])
         options = {"6": "6 GB", "12": "12 GB", "18": "18 GB", "24": "24 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(mem_val) == k else ''}{v}", callback_data=f"form_param:memory_in_gbs:{k}") for k, v in options.items()]
+        # 修改：从两行双列改为一行四列
         keyboard.append(option_buttons)
         if not mem_val: all_params_selected = False
+
     if shape:
         disk_val = form_data.get('boot_volume_size')
         text += f"磁盘大小: `{f'{disk_val} GB' if disk_val else '尚未选择'}`\n"
-        keyboard.append([InlineKeyboardButton("──── 实例硬盘大小 ────", callback_data="ignore")])
+        keyboard.append([InlineKeyboardButton("─── 实例硬盘大小 ───", callback_data="ignore")])
         options = {"50": "50 GB", "100": "100 GB", "150": "150 GB", "200": "200 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(disk_val) == k else ''}{v}", callback_data=f"form_param:boot_volume_size:{k}") for k, v in options.items()]
+        # 修改：从两行双列改为一行四列
         keyboard.append(option_buttons)
         if not disk_val: all_params_selected = False
+
     if action_type == 'start_snatch':
         text += f"重试间隔: `{form_data.get('min_delay', '45')}-{form_data.get('max_delay', '90')} 秒`"
+
     if all_params_selected:
         keyboard.append([InlineKeyboardButton("🚀 确认提交", callback_data="form_submit")])
+        
     alias = context.user_data.get('alias')
     keyboard.append([InlineKeyboardButton("❌ 取消操作", callback_data=f"back:account:{alias}")])
+    
     keyboard.append(get_footer_ruler())
     return text, InlineKeyboardMarkup(keyboard)
 
@@ -304,14 +310,11 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.pop('instance_list', None)
         context.user_data.pop('current_action', None)
     
-    # 最终修正：处理全局任务查询
     elif command == "tasks":
         if parts[1] == 'all':
-            # 显示任务类型选择菜单
             reply_markup, text = await build_task_menu()
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         elif parts[1] == 'view':
-            # 执行查询并显示结果
             task_type, task_status = parts[2], parts[3]
             status_text = "运行中" if task_status == "running" else "已完成"
             await query.edit_message_text(text=f"正在查询所有账户 *{status_text}* 的 *{task_type}* 任务...", parse_mode=ParseMode.MARKDOWN)
@@ -337,25 +340,22 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                     status_icon = ""
                     if task_status == 'completed':
                         status_icon = "✅" if task.get("status") == "success" else "❌"
-                    # 在结果中增加账户名(alias)
                     task_alias = task.get('alias', 'N/A')
                     text += f"*{task.get('name')}* (账户: {task_alias}) {status_icon}:\n`{task.get('result', '无结果')}`\n\n"
             await query.edit_message_text(text, reply_markup=back_keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
 
     elif command == "back":
         target = parts[1]
+        alias = parts[2] if len(parts) > 2 else context.user_data.get('alias')
         if target == "main":
             await start_command(update, context)
         elif target == "account":
-            alias = parts[2]
             context.user_data.clear()
             reply_markup, text = await build_account_menu(alias)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         elif target == "instances":
-            alias = parts[2]
             reply_markup, text = await build_instance_action_menu(alias)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        # 'back:tasks' 会被 'tasks:all' 覆盖，所以无需特殊处理
 
 async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_data: dict):
     action_type = context.user_data.get('action_in_progress')
