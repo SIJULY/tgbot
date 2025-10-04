@@ -31,6 +31,7 @@ def get_footer_ruler() -> List[InlineKeyboardButton]:
         InlineKeyboardButton(right_button_text, callback_data="ignore")
     ]
 
+
 # --- 2. API 客户端 ---
 BASE_URL = f"{PANEL_URL}/api/v1/oci"
 HEADERS = {"Authorization": f"Bearer {PANEL_API_KEY}", "Content-Type": "application/json"}
@@ -77,7 +78,6 @@ async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, tas
 # --- 菜单构建函数 ---
 
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
-    # 此函数已确认在手机和电脑端表现一致，无需修改
     shape = form_data.get('shape')
     is_flex = shape and "Flex" in shape
     text = f"⚙️ *请配置实例参数*\n*{'抢占任务' if action_type == 'start_snatch' else '创建任务'}*\n\n"
@@ -149,11 +149,15 @@ async def build_account_menu(alias: str):
     return InlineKeyboardMarkup(keyboard), f"已选择账户: *{alias}*\n请选择功能模块:"
 
 async def build_instance_action_menu(alias: str):
+    # 最终修正：根据您的要求改为单列布局并调整顺序
     keyboard = [
         create_title_bar("实例操作"),
-        [InlineKeyboardButton("✅ 开机", callback_data=f"action:{alias}:START"), InlineKeyboardButton("🛑 关机", callback_data=f"action:{alias}:STOP")],
-        [InlineKeyboardButton("🔄 重启", callback_data=f"action:{alias}:RESTART"), InlineKeyboardButton("🗑️ 终止", callback_data=f"action:{alias}:TERMINATE")],
-        [InlineKeyboardButton("🌐 更换IP", callback_data=f"action:{alias}:CHANGEIP"), InlineKeyboardButton("🌐 分配IPv6", callback_data=f"action:{alias}:ASSIGNIPV6")],
+        [InlineKeyboardButton("🌐 更换IP", callback_data=f"action:{alias}:CHANGEIP")],
+        [InlineKeyboardButton("🌐 分配IPv6", callback_data=f"action:{alias}:ASSIGNIPV6")],
+        [InlineKeyboardButton("✅ 开机", callback_data=f"action:{alias}:START")],
+        [InlineKeyboardButton("🔄 重启", callback_data=f"action:{alias}:RESTART")],
+        [InlineKeyboardButton("🛑 关机", callback_data=f"action:{alias}:STOP")],
+        [InlineKeyboardButton("🗑️ 终止", callback_data=f"action:{alias}:TERMINATE")],
         [InlineKeyboardButton("⬅️ 返回", callback_data=f"back:account:{alias}")],
     ]
     keyboard.append(get_footer_ruler())
@@ -254,7 +258,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         reply_markup, text = await build_instance_selection_menu(alias, action, context)
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     
-    # --- 恢复的功能区 ---
     elif command == "exec":
         alias = context.user_data.get('current_alias')
         action = context.user_data.get('current_action')
@@ -271,7 +274,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if vnic_id: payload['vnic_id'] = vnic_id
         result = await api_request("POST", f"{alias}/instance-action", json=payload)
         
-        # 修正键盘格式
         keyboard = [
             create_title_bar("命令结果"),
             [InlineKeyboardButton("⬅️ 返回账户菜单", callback_data=f"back:account:{alias}")],
@@ -295,10 +297,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         status_text = "运行中" if task_status == "running" else "已完成"
         await query.edit_message_text(text=f"正在查询 *{alias}* 账户 *{status_text}* 的 *{task_type}* 任务...", parse_mode=ParseMode.MARKDOWN)
         
-        # 修正 API 端点
         tasks = await api_request("GET", f"tasks/{task_type}/{task_status}")
         
-        # 修正键盘格式
         keyboard = [
             create_title_bar("任务列表"),
             [InlineKeyboardButton("⬅️ 返回", callback_data=f"back:tasks:{alias}")],
@@ -319,7 +319,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                     status_icon = "✅" if task.get("status") == "success" else "❌"
                 text += f"*{task.get('name')}* {status_icon}:\n`{task.get('result', '无结果')}`\n\n"
         await query.edit_message_text(text, reply_markup=back_keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
-    # --- 恢复结束 ---
 
     elif command == "back":
         target = parts[1]
