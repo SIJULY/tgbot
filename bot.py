@@ -24,8 +24,8 @@ def create_title_bar(title: str) -> List[InlineKeyboardButton]:
     return [InlineKeyboardButton(f"❖ {title} ❖", callback_data="ignore")]
 
 def get_footer_ruler() -> List[InlineKeyboardButton]:
-    left_button_text = "───« Cloud Manager"
-    right_button_text = "»───" 
+    left_button_text = "─────« Cloud"
+    right_button_text = "Manager »────" 
     return [
         InlineKeyboardButton(left_button_text, callback_data="ignore"),
         InlineKeyboardButton(right_button_text, callback_data="ignore")
@@ -149,15 +149,11 @@ async def build_account_menu(alias: str):
     return InlineKeyboardMarkup(keyboard), f"已选择账户: *{alias}*\n请选择功能模块:"
 
 async def build_instance_action_menu(alias: str):
-    # 最终修正：根据您的要求改为单列布局并调整顺序
     keyboard = [
         create_title_bar("实例操作"),
-        [InlineKeyboardButton("🌐 更换IP", callback_data=f"action:{alias}:CHANGEIP")],
-        [InlineKeyboardButton("🌐 分配IPv6", callback_data=f"action:{alias}:ASSIGNIPV6")],
-        [InlineKeyboardButton("✅ 开机", callback_data=f"action:{alias}:START")],
-        [InlineKeyboardButton("🔄 重启", callback_data=f"action:{alias}:RESTART")],
-        [InlineKeyboardButton("🛑 关机", callback_data=f"action:{alias}:STOP")],
-        [InlineKeyboardButton("🗑️ 终止", callback_data=f"action:{alias}:TERMINATE")],
+        [InlineKeyboardButton("✅ 开机", callback_data=f"action:{alias}:START"), InlineKeyboardButton("🛑 关机", callback_data=f"action:{alias}:STOP")],
+        [InlineKeyboardButton("🔄 重启", callback_data=f"action:{alias}:RESTART"), InlineKeyboardButton("🗑️ 终止", callback_data=f"action:{alias}:TERMINATE")],
+        [InlineKeyboardButton("🌐 更换IP", callback_data=f"action:{alias}:CHANGEIP"), InlineKeyboardButton("🌐 分配IPv6", callback_data=f"action:{alias}:ASSIGNIPV6")],
         [InlineKeyboardButton("⬅️ 返回", callback_data=f"back:account:{alias}")],
     ]
     keyboard.append(get_footer_ruler())
