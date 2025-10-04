@@ -84,7 +84,7 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
     text += f"实例名称: `{form_data.get('display_name_prefix', 'N/A')}`\n"
     text += f"实例规格: `{shape or '尚未选择'}`\n"
     keyboard = [create_title_bar("参数配置")]
-    keyboard.append([InlineKeyboardButton("─── 实例规格 ───", callback_data="ignore")])
+    keyboard.append([InlineKeyboardButton("───── 实例型号 ─────", callback_data="ignore")])
     shape_buttons = [
         InlineKeyboardButton(f"{'✅ ' if shape and 'A1.Flex' in shape else ''}ARM (A1.Flex)", callback_data="form_param:shape:VM.Standard.A1.Flex"),
         InlineKeyboardButton(f"{'✅ ' if shape and 'E2.1.Micro' in shape else ''}AMD (E2.Micro)", callback_data="form_param:shape:VM.Standard.E2.1.Micro")
@@ -95,7 +95,7 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
     if is_flex:
         ocpu_val = form_data.get('ocpus')
         text += f"OCPU: `{ocpu_val or '尚未选择'}`\n"
-        keyboard.append([InlineKeyboardButton("─── 实例CPU规格 ───", callback_data="ignore")])
+        keyboard.append([InlineKeyboardButton("──── 实例CPU规格 ────", callback_data="ignore")])
         options = {"1": "1 OCPU", "2": "2 OCPU", "3": "3 OCPU", "4": "4 OCPU"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(ocpu_val) == k else ''}{v}", callback_data=f"form_param:ocpus:{k}") for k, v in options.items()]
         keyboard.append(option_buttons)
@@ -111,7 +111,7 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
     if shape:
         disk_val = form_data.get('boot_volume_size')
         text += f"磁盘大小: `{f'{disk_val} GB' if disk_val else '尚未选择'}`\n"
-        keyboard.append([InlineKeyboardButton("─── 实例硬盘大小 ───", callback_data="ignore")])
+        keyboard.append([InlineKeyboardButton("──── 实例硬盘大小 ────", callback_data="ignore")])
         options = {"50": "50 GB", "100": "100 GB", "150": "150 GB", "200": "200 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(disk_val) == k else ''}{v}", callback_data=f"form_param:boot_volume_size:{k}") for k, v in options.items()]
         keyboard.append(option_buttons)
