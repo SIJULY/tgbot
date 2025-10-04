@@ -15,7 +15,7 @@ YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
 # --- Variables ---
-BOT_PY_URL="https://raw.githubusercontent.com/sijuly/main/bot.py"
+BOT_PY_URL="https://raw.githubusercontent.com/sijuly/tgbot/main/bot.py"
 INSTALL_DIR="/opt/tgbot"
 
 # --- Check for root privileges ---
