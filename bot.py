@@ -77,45 +77,66 @@ async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, tas
 
 # --- 菜单构建函数 ---
 
-# 这是您提供的、测试通过的新版本函数
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
     shape = form_data.get('shape')
-    is_flex = shape and "Flex" in shape
+    # --- 关键修改 ---
+    # 精确判断只有ARM(A1.Flex)机型才显示CPU和内存选项
+    is_flex = shape and "A1.Flex" in shape 
+    
     text = f"⚙️ *请配置实例参数*\n*{'抢占任务' if action_type == 'start_snatch' else '创建任务'}*\n\n"
     text += f"实例名称: `{form_data.get('display_name_prefix', 'N/A')}`\n"
-    # 根据您的建议，这里只显示缩写，让消息体更简洁
-    text += f"实例规格: `{'ARM' if shape and 'A1.Flex' in shape else ('AMD' if shape else '尚未选择')}`\n"
+    
+    spec_text = '尚未选择'
+    if shape:
+        if 'A1.Flex' in shape:
+            spec_text = 'ARM'
+        elif 'E4.Flex' in shape:
+            spec_text = 'AMD'
+    text += f"实例规格: `{spec_text}`\n"
     
     keyboard = [create_title_bar("参数配置")]
     all_params_selected = True
     
+    # 机型选择，保持一行两列
+    keyboard.append([InlineKeyboardButton("─── 实例机型选择 ───", callback_data="ignore")])
+    shape_options = {
+        "VM.Standard.A1.Flex": "ARM",
+        "VM.Standard.E4.Flex": "AMD"
+    }
+    shape_buttons = [
+        InlineKeyboardButton(
+            f"{'✅ ' if shape == k else ''}{v}",
+            callback_data=f"form_param:shape:{k}"
+        ) for k, v in shape_options.items()
+    ]
+    keyboard.append(shape_buttons)
+    if not shape: all_params_selected = False
+
+    # 只有 is_flex 为 True (即选择了ARM) 时，才显示这些部分
     if is_flex:
         ocpu_val = form_data.get('ocpus')
         text += f"OCPU: `{ocpu_val or '尚未选择'}`\n"
         keyboard.append([InlineKeyboardButton("─── 实例CPU规格 ───", callback_data="ignore")])
         options = {"1": "1 OCPU", "2": "2 OCPU", "3": "3 OCPU", "4": "4 OCPU"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(ocpu_val) == k else ''}{v}", callback_data=f"form_param:ocpus:{k}") for k, v in options.items()]
-        # 修改：从两行双列改为一行四列
         keyboard.append(option_buttons)
         if not ocpu_val: all_params_selected = False
 
-    if is_flex:
         mem_val = form_data.get('memory_in_gbs')
         text += f"内存: `{f'{mem_val} GB' if mem_val else '尚未选择'}`\n"
         keyboard.append([InlineKeyboardButton("─── 实例运行内存规格 ───", callback_data="ignore")])
         options = {"6": "6 GB", "12": "12 GB", "18": "18 GB", "24": "24 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(mem_val) == k else ''}{v}", callback_data=f"form_param:memory_in_gbs:{k}") for k, v in options.items()]
-        # 修改：从两行双列改为一行四列
         keyboard.append(option_buttons)
         if not mem_val: all_params_selected = False
 
+    # 只要选择了任一机型(shape存在)，就显示硬盘大小选项
     if shape:
         disk_val = form_data.get('boot_volume_size')
         text += f"磁盘大小: `{f'{disk_val} GB' if disk_val else '尚未选择'}`\n"
         keyboard.append([InlineKeyboardButton("─── 实例硬盘大小 ───", callback_data="ignore")])
         options = {"50": "50 GB", "100": "100 GB", "150": "150 GB", "200": "200 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(disk_val) == k else ''}{v}", callback_data=f"form_param:boot_volume_size:{k}") for k, v in options.items()]
-        # 修改：从两行双列改为一行四列
         keyboard.append(option_buttons)
         if not disk_val: all_params_selected = False
 
@@ -138,30 +159,23 @@ async def build_main_menu():
     if not profiles:
         return None, "面板中尚未配置任何OCI账户。"
 
-    # 按照您的新要求构建键盘
     keyboard = [
-        # 1. 使用新的标题
         create_title_bar("Cloud Manager Panel Telegram Bot"),
-        # 2. “查看所有任务”按钮在最上方
         [InlineKeyboardButton("📝 查看抢占实例任务", callback_data="tasks:all")],
-        # 3. 增加一个分隔标题
         [InlineKeyboardButton("👇 OCI 账户选择", callback_data="ignore")]
     ]
 
-    # 4. 添加账户列表
     for i in range(0, len(profiles), 2):
         row = [InlineKeyboardButton(profiles[i], callback_data=f"account:{profiles[i]}")]
         if i + 1 < len(profiles):
             row.append(InlineKeyboardButton(profiles[i+1], callback_data=f"account:{profiles[i+1]}"))
         keyboard.append(row)
     
-    # 5. 添加页脚
     keyboard.append(get_footer_ruler())
     
     return InlineKeyboardMarkup(keyboard), "请选择要操作的 OCI 账户:"
 
 async def build_account_menu(alias: str):
-    # 最终修正：移除此处的“查看任务”按钮
     keyboard = [
         create_title_bar(f"账户: {alias}"),
         [InlineKeyboardButton("🖥️ 实例操作", callback_data=f"menu:instances:{alias}")],
@@ -267,7 +281,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if menu_type == "instances":
             reply_markup, text = await build_instance_action_menu(alias)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        # 移除了 menu:tasks 的处理逻辑
     elif command == "action":
         alias, action = parts[1], parts[2]
         context.user_data['current_alias'] = alias
