@@ -127,22 +127,39 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
 
 async def build_main_menu():
     profiles = await api_request("GET", "profiles")
-    if not profiles or "error" in profiles: return None, f"..."
-    if not profiles: return None, "..."
-    keyboard = [create_title_bar("OCI 账户选择")]
+    if not profiles or "error" in profiles:
+        return None, f"❌ 无法从面板获取账户列表: {profiles.get('error', '未知错误') if profiles else '无响应'}"
+    if not profiles:
+        return None, "面板中尚未配置任何OCI账户。"
+
+    # 按照您的新要求构建键盘
+    keyboard = [
+        # 1. 使用新的标题
+        create_title_bar("Cloud Manager Panel Telegram Bot"),
+        # 2. “查看所有任务”按钮在最上方
+        [InlineKeyboardButton("📝 查看抢占实例任务", callback_data="tasks:all")],
+        # 3. 增加一个分隔标题
+        [InlineKeyboardButton("👇 OCI 账户选择", callback_data="ignore")]
+    ]
+
+    # 4. 添加账户列表
     for i in range(0, len(profiles), 2):
         row = [InlineKeyboardButton(profiles[i], callback_data=f"account:{profiles[i]}")]
-        if i + 1 < len(profiles): row.append(InlineKeyboardButton(profiles[i+1], callback_data=f"account:{profiles[i+1]}"))
+        if i + 1 < len(profiles):
+            row.append(InlineKeyboardButton(profiles[i+1], callback_data=f"account:{profiles[i+1]}"))
         keyboard.append(row)
+    
+    # 5. 添加页脚
     keyboard.append(get_footer_ruler())
+    
     return InlineKeyboardMarkup(keyboard), "请选择要操作的 OCI 账户:"
 
 async def build_account_menu(alias: str):
+    # 最终修正：移除此处的“查看任务”按钮
     keyboard = [
         create_title_bar(f"账户: {alias}"),
         [InlineKeyboardButton("🖥️ 实例操作", callback_data=f"menu:instances:{alias}")],
         [InlineKeyboardButton("➕ 创建实例", callback_data=f"start_create:{alias}"), InlineKeyboardButton("🤖 抢占实例", callback_data=f"start_snatch:{alias}")],
-        [InlineKeyboardButton("📝 查看任务", callback_data=f"menu:tasks:{alias}")],
         [InlineKeyboardButton("⬅️ 返回主菜单", callback_data=f"back:main")]
     ]
     keyboard.append(get_footer_ruler())
@@ -172,12 +189,13 @@ async def build_instance_selection_menu(alias: str, action: str, context: Contex
     keyboard.append(get_footer_ruler())
     return InlineKeyboardMarkup(keyboard), f"请选择要执行 *{action}* 操作的实例:"
 
-async def build_task_menu(alias: str):
+async def build_task_menu():
+    """全局任务查询菜单"""
     keyboard = [
         create_title_bar("任务查询"),
-        [InlineKeyboardButton("🏃 运行中的抢占任务", callback_data=f"tasks:{alias}:snatch:running")],
-        [InlineKeyboardButton("✅ 已完成的抢占任务", callback_data=f"tasks:{alias}:snatch:completed")],
-        [InlineKeyboardButton("⬅️ 返回", callback_data=f"back:account:{alias}")],
+        [InlineKeyboardButton("🏃 查看运行中的任务", callback_data="tasks:view:snatch:running")],
+        [InlineKeyboardButton("✅ 查看已完成的任务", callback_data=f"tasks:view:snatch:completed")],
+        [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back:main")],
     ]
     keyboard.append(get_footer_ruler())
     return InlineKeyboardMarkup(keyboard), f"请选择要查看的任务类型:"
@@ -243,9 +261,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if menu_type == "instances":
             reply_markup, text = await build_instance_action_menu(alias)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        elif menu_type == "tasks":
-            reply_markup, text = await build_task_menu(alias)
-            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        # 移除了 menu:tasks 的处理逻辑
     elif command == "action":
         alias, action = parts[1], parts[2]
         context.user_data['current_alias'] = alias
@@ -288,50 +304,58 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.pop('instance_list', None)
         context.user_data.pop('current_action', None)
     
+    # 最终修正：处理全局任务查询
     elif command == "tasks":
-        alias, task_type, task_status = parts[1], parts[2], parts[3]
-        status_text = "运行中" if task_status == "running" else "已完成"
-        await query.edit_message_text(text=f"正在查询 *{alias}* 账户 *{status_text}* 的 *{task_type}* 任务...", parse_mode=ParseMode.MARKDOWN)
-        
-        tasks = await api_request("GET", f"tasks/{task_type}/{task_status}")
-        
-        keyboard = [
-            create_title_bar("任务列表"),
-            [InlineKeyboardButton("⬅️ 返回", callback_data=f"back:tasks:{alias}")],
-            get_footer_ruler()
-        ]
-        back_keyboard = InlineKeyboardMarkup(keyboard)
+        if parts[1] == 'all':
+            # 显示任务类型选择菜单
+            reply_markup, text = await build_task_menu()
+            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        elif parts[1] == 'view':
+            # 执行查询并显示结果
+            task_type, task_status = parts[2], parts[3]
+            status_text = "运行中" if task_status == "running" else "已完成"
+            await query.edit_message_text(text=f"正在查询所有账户 *{status_text}* 的 *{task_type}* 任务...", parse_mode=ParseMode.MARKDOWN)
+            
+            tasks = await api_request("GET", f"tasks/{task_type}/{task_status}")
+            
+            keyboard = [
+                create_title_bar("所有任务列表"),
+                [InlineKeyboardButton("⬅️ 返回", callback_data="tasks:all")],
+                get_footer_ruler()
+            ]
+            back_keyboard = InlineKeyboardMarkup(keyboard)
 
-        if not tasks or "error" in tasks:
-            await query.edit_message_text(text=f"❌ 查询任务失败: {tasks.get('error', '未知错误')}", reply_markup=back_keyboard)
-            return
-        text = f"*{alias}* - *{status_text}* 的 *{task_type}* 任务:\n\n"
-        if not tasks:
-            text += "没有找到相关任务记录。"
-        else:
-            for task in tasks[:10]:
-                status_icon = ""
-                if task_status == 'completed':
-                    status_icon = "✅" if task.get("status") == "success" else "❌"
-                text += f"*{task.get('name')}* {status_icon}:\n`{task.get('result', '无结果')}`\n\n"
-        await query.edit_message_text(text, reply_markup=back_keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
+            if not tasks or "error" in tasks:
+                await query.edit_message_text(text=f"❌ 查询任务失败: {tasks.get('error', '未知错误')}", reply_markup=back_keyboard)
+                return
+            
+            text = f"所有账户 *{status_text}* 的 *{task_type}* 任务:\n\n"
+            if not tasks:
+                text += "没有找到相关任务记录。"
+            else:
+                for task in tasks[:10]:
+                    status_icon = ""
+                    if task_status == 'completed':
+                        status_icon = "✅" if task.get("status") == "success" else "❌"
+                    # 在结果中增加账户名(alias)
+                    task_alias = task.get('alias', 'N/A')
+                    text += f"*{task.get('name')}* (账户: {task_alias}) {status_icon}:\n`{task.get('result', '无结果')}`\n\n"
+            await query.edit_message_text(text, reply_markup=back_keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
 
     elif command == "back":
         target = parts[1]
-        alias = parts[2] if len(parts) > 2 else context.user_data.get('alias')
         if target == "main":
             await start_command(update, context)
         elif target == "account":
+            alias = parts[2]
             context.user_data.clear()
             reply_markup, text = await build_account_menu(alias)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         elif target == "instances":
+            alias = parts[2]
             reply_markup, text = await build_instance_action_menu(alias)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        elif target == "tasks":
-            reply_markup, text = await build_task_menu(alias)
-            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-
+        # 'back:tasks' 会被 'tasks:all' 覆盖，所以无需特殊处理
 
 async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_data: dict):
     action_type = context.user_data.get('action_in_progress')
