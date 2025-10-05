@@ -1,7 +1,9 @@
 import asyncio
 import httpx
 import logging
-from datetime import datetime
+import json
+import re # <<< 1. 新增导入 re 模块
+from datetime import datetime, timezone
 from typing import List
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
