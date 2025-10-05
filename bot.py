@@ -12,7 +12,7 @@ from telegram.error import BadRequest
 PANEL_URL = "Your Panel URL Placeholder"
 PANEL_API_KEY = "Your API Key Placeholder"
 BOT_TOKEN = "Your Bot Token Placeholder"
-AUTHORIZED_USER_IDS = [123456789] 
+AUTHORIZED_USER_IDS = [123456789]
 
 # --- 日志配置 ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -77,39 +77,36 @@ async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, tas
 
 # --- 菜单构建函数 ---
 
-# --- 修改点 2：修改参数选择页面 ---
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
     shape = form_data.get('shape')
     is_flex = shape and "Flex" in shape
-    text = f"⚙️ *请配置实例参数*\n*抢占任务*\n\n" # 简化标题
+    text = f"⚙️ *请配置实例参数*\n*抢占任务*\n\n"
     text += f"实例名称: `{form_data.get('display_name_prefix', 'N/A')}`\n"
     
     spec_text = '尚未选择'
     if shape:
         if 'A1.Flex' in shape: spec_text = 'ARM'
-        elif 'E2.1.Micro' in shape: spec_text = 'AMD' # 使用正确的机型
+        elif 'E2.1.Micro' in shape: spec_text = 'AMD'
     text += f"实例规格: `{spec_text}`\n"
     
     keyboard = [create_title_bar("参数配置")]
     all_params_selected = True
     
-    # --- 增加机型选择按钮 ---
     keyboard.append([InlineKeyboardButton("─── 实例机型选择 ───", callback_data="ignore")])
     shape_options = {
         "VM.Standard.A1.Flex": "ARM",
         "VM.Standard.E2.1.Micro": "AMD"
     }
     shape_buttons = [InlineKeyboardButton(f"{'✅ ' if shape == k else ''}{v}", callback_data=f"form_param:shape:{k}") for k, v in shape_options.items()]
-    keyboard.append(shape_buttons) # 保持一行两列
+    keyboard.append(shape_buttons)
     if not shape: all_params_selected = False
 
-    if is_flex: # 这段逻辑现在只对 ARM 生效，因为 AMD 机型名不含 Flex
+    if is_flex:
         ocpu_val = form_data.get('ocpus')
         text += f"OCPU: `{ocpu_val or '尚未选择'}`\n"
         keyboard.append([InlineKeyboardButton("─── 实例CPU规格 ───", callback_data="ignore")])
         options = {"1": "1 OCPU", "2": "2 OCPU", "3": "3 OCPU", "4": "4 OCPU"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(ocpu_val) == k else ''}{v}", callback_data=f"form_param:ocpus:{k}") for k, v in options.items()]
-        # --- 改为一行四列 ---
         keyboard.append(option_buttons)
         if not ocpu_val: all_params_selected = False
 
@@ -118,7 +115,6 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
         keyboard.append([InlineKeyboardButton("─── 实例运行内存规格 ───", callback_data="ignore")])
         options = {"6": "6 GB", "12": "12 GB", "18": "18 GB", "24": "24 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(mem_val) == k else ''}{v}", callback_data=f"form_param:memory_in_gbs:{k}") for k, v in options.items()]
-        # --- 改为一行四列 ---
         keyboard.append(option_buttons)
         if not mem_val: all_params_selected = False
 
@@ -128,7 +124,6 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
         keyboard.append([InlineKeyboardButton("─── 实例硬盘大小 ───", callback_data="ignore")])
         options = {"50": "50 GB", "100": "100 GB", "150": "150 GB", "200": "200 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(disk_val) == k else ''}{v}", callback_data=f"form_param:boot_volume_size:{k}") for k, v in options.items()]
-        # --- 改为一行四列 ---
         keyboard.append(option_buttons)
         if not disk_val: all_params_selected = False
     else:
@@ -168,45 +163,55 @@ async def build_main_menu():
     
     return InlineKeyboardMarkup(keyboard), "请选择要操作的 OCI 账户:"
 
-# --- 修改点 1：修改账户菜单 ---
-async def build_account_menu(alias: str):
+async def build_account_menu(alias: str, context: ContextTypes.DEFAULT_TYPE):
+    instances = await api_request("GET", f"{alias}/instances")
+    context.user_data['instance_list'] = instances
+
     keyboard = [
         create_title_bar(f"账户: {alias}"),
         [
             InlineKeyboardButton("🖥️ 实例操作", callback_data=f"menu:instances:{alias}"),
             InlineKeyboardButton("🤖 创建及抢占实例", callback_data=f"start_snatch:{alias}")
         ],
-        [InlineKeyboardButton("⬅️ 返回主菜单", callback_data=f"back:main")]
+        [InlineKeyboardButton("👇 选择下方实例以执行操作 👇", callback_data="ignore")]
     ]
-    keyboard.append(get_footer_ruler())
-    return InlineKeyboardMarkup(keyboard), f"已选择账户: *{alias}*\n请选择功能模块:"
+    
+    if isinstance(instances, list) and instances:
+        for i in range(0, len(instances), 2):
+            row = []
+            inst1 = instances[i]
+            row.append(InlineKeyboardButton(f"{inst1['display_name']} ({inst1['lifecycle_state']})", callback_data=f"exec:{i}"))
+            
+            if i + 1 < len(instances):
+                inst2 = instances[i+1]
+                row.append(InlineKeyboardButton(f"{inst2['display_name']} ({inst2['lifecycle_state']})", callback_data=f"exec:{i+1}")) # 修正了这里的小BUG
+            keyboard.append(row)
+    elif not instances:
+        keyboard.append([InlineKeyboardButton("该账户下没有实例", callback_data="ignore")])
+    else:
+        error_msg = instances.get('error', '未知错误') if isinstance(instances, dict) else '获取失败'
+        keyboard.append([InlineKeyboardButton(f"❌ 获取实例列表失败: {error_msg}", callback_data="ignore")])
 
+    keyboard.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data=f"back:main")])
+    keyboard.append(get_footer_ruler())
+
+    return InlineKeyboardMarkup(keyboard), f"已选择账户: *{alias}*\n请选择功能模块或下方的一个实例:"
+
+# --- 关键修改：恢复此页面的双列布局 ---
 async def build_instance_action_menu(alias: str):
     keyboard = [
         create_title_bar("实例操作"),
-        [InlineKeyboardButton("✅ 开机", callback_data=f"action:{alias}:START"), InlineKeyboardButton("🛑 关机", callback_data=f"action:{alias}:STOP")],
-        [InlineKeyboardButton("🔄 重启", callback_data=f"action:{alias}:RESTART"), InlineKeyboardButton("🗑️ 终止", callback_data=f"action:{alias}:TERMINATE")],
-        [InlineKeyboardButton("🌐 更换IP", callback_data=f"action:{alias}:CHANGEIP"), InlineKeyboardButton("🌐 分配IPv6", callback_data=f"action:{alias}:ASSIGNIPV6")],
+        # 恢复为双列布局
+        [InlineKeyboardButton("✅ 开机", callback_data="perform_action:START"), InlineKeyboardButton("🛑 关机", callback_data="perform_action:STOP")],
+        [InlineKeyboardButton("🔄 重启", callback_data="perform_action:RESTART"), InlineKeyboardButton("🗑️ 终止", callback_data="perform_action:TERMINATE")],
+        [InlineKeyboardButton("🌐 更换IP", callback_data="perform_action:CHANGEIP"), InlineKeyboardButton("🌐 分配IPv6", callback_data="perform_action:ASSIGNIPV6")],
+        # 返回按钮保持单行
         [InlineKeyboardButton("⬅️ 返回", callback_data=f"back:account:{alias}")],
     ]
     keyboard.append(get_footer_ruler())
     return InlineKeyboardMarkup(keyboard), f"请为账户 *{alias}* 选择实例操作类型:"
 
-async def build_instance_selection_menu(alias: str, action: str, context: ContextTypes.DEFAULT_TYPE):
-    instances = await api_request("GET", f"{alias}/instances")
-    if not instances or "error" in instances: return None, f"..."
-    if not instances: return None, f"..."
-    context.user_data['instance_list'] = instances
-    keyboard = [create_title_bar("选择实例")]
-    for index, inst in enumerate(instances):
-        display_text = f"{inst['display_name']} ({inst['lifecycle_state']})"
-        keyboard.append([InlineKeyboardButton(display_text, callback_data=f"exec:{index}")])
-    keyboard.append([InlineKeyboardButton("⬅️ 返回", callback_data=f"back:instances:{alias}")])
-    keyboard.append(get_footer_ruler())
-    return InlineKeyboardMarkup(keyboard), f"请选择要执行 *{action}* 操作的实例:"
-
 async def build_task_menu():
-    """全局任务查询菜单"""
     keyboard = [
         create_title_bar("任务查询"),
         [InlineKeyboardButton("🏃 查看运行中的任务", callback_data="tasks:view:snatch:running")],
@@ -241,7 +246,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.clear()
         context.user_data['action_in_progress'] = command
         context.user_data['alias'] = alias
-        prefix = "snatch" # 统一使用 snatch 前缀
+        prefix = "snatch"
         timestamp = datetime.now().strftime("%m%d-%H%M")
         auto_name = f"{prefix}-{timestamp}"
         context.user_data['form_data'] = {'display_name_prefix': auto_name, 'shape': 'VM.Standard.A1.Flex'}
@@ -270,35 +275,51 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     if command == "account":
         alias = parts[1]
         context.user_data['current_alias'] = alias
-        reply_markup, text = await build_account_menu(alias)
+        await query.edit_message_text(f"正在为账户 *{alias}* 加载实例列表...", parse_mode=ParseMode.MARKDOWN)
+        reply_markup, text = await build_account_menu(alias, context)
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        return
+
     elif command == "menu":
         menu_type, alias = parts[1], parts[2]
         if menu_type == "instances":
-            reply_markup, text = await build_instance_action_menu(alias)
-            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    elif command == "action":
-        alias, action = parts[1], parts[2]
-        context.user_data['current_alias'] = alias
-        context.user_data['current_action'] = action
-        await query.edit_message_text(text=f"正在为账户 *{alias}* 获取实例列表...", parse_mode=ParseMode.MARKDOWN)
-        reply_markup, text = await build_instance_selection_menu(alias, action, context)
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    
-    elif command == "exec":
-        alias = context.user_data.get('current_alias')
-        action = context.user_data.get('current_action')
-        instance_list = context.user_data.get('instance_list')
-        if not all([alias, action, instance_list]):
-            await query.edit_message_text("会话已过期或信息不完整...", reply_markup=None)
+            await query.answer("请直接点击下方您想操作的实例。", show_alert=True)
             return
+            
+    elif command == "exec":
         instance_index = int(parts[1])
+        alias = context.user_data.get('current_alias')
+        instance_list = context.user_data.get('instance_list')
+
+        if not all([alias, instance_list is not None]):
+            await query.edit_message_text("会话已过期，请返回重试。", reply_markup=None)
+            return
+        
         selected_instance = instance_list[instance_index]
+        context.user_data['selected_instance_for_action'] = selected_instance 
+        
+        reply_markup, text = await build_instance_action_menu(alias)
+        await query.edit_message_text(f"已选择实例: *{selected_instance['display_name']}*\n请选择要执行的操作：", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        return
+
+    elif command == "perform_action":
+        action = parts[1]
+        alias = context.user_data.get('current_alias')
+        selected_instance = context.user_data.get('selected_instance_for_action')
+
+        if not all([alias, action, selected_instance]):
+            await query.edit_message_text("会话已过期，请返回重试。", reply_markup=None)
+            return
+
         instance_id = selected_instance['id']
+        instance_name = selected_instance['display_name']
         vnic_id = selected_instance.get('vnic_id')
-        await query.edit_message_text(text=f"正在为实例 *{selected_instance['display_name']}* 发送 *{action}* 命令...", parse_mode=ParseMode.MARKDOWN)
-        payload = {"action": action, "instance_id": instance_id, "instance_name": selected_instance['display_name']}
+
+        await query.edit_message_text(text=f"正在为实例 *{instance_name}* 发送 *{action}* 命令...", parse_mode=ParseMode.MARKDOWN)
+        
+        payload = {"action": action, "instance_id": instance_id, "instance_name": instance_name}
         if vnic_id: payload['vnic_id'] = vnic_id
+        
         result = await api_request("POST", f"{alias}/instance-action", json=payload)
         
         keyboard = [
@@ -310,14 +331,15 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
         if result and result.get("task_id"):
             task_id = result.get("task_id")
-            task_name = f"{action} on {selected_instance['display_name']}"
+            task_name = f"{action} on {instance_name}"
             text = f"✅ 命令发送成功！\n任务ID: `{task_id}`\n\n机器人将在后台为您监控任务，完成后会主动通知您。"
             asyncio.create_task(poll_task_status(update.effective_chat.id, context, task_id, task_name))
         else:
             text = f"❌ 命令发送失败: {result.get('error', '未知错误')}"
+        
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        context.user_data.pop('instance_list', None)
-        context.user_data.pop('current_action', None)
+        context.user_data.pop('selected_instance_for_action', None)
+        return
     
     elif command == "tasks":
         if parts[1] == 'all':
@@ -337,22 +359,17 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             ]
             back_keyboard = InlineKeyboardMarkup(keyboard)
 
-            # --- 关键修正：分离错误处理和空列表处理 ---
-
-            # 1. 首先，专门检查API是否返回了错误信息
             if isinstance(tasks, dict) and "error" in tasks:
                 await query.edit_message_text(text=f"❌ 查询任务失败: {tasks.get('error', '未知错误')}", reply_markup=back_keyboard)
                 return
             
-            # 2. 检查返回的是否是我们期望的列表类型
             if not isinstance(tasks, list):
                 await query.edit_message_text(text=f"❌ 查询失败: API返回了意外的数据格式。", reply_markup=back_keyboard)
                 return
 
-            # 3. 在确认没有错误且格式正确后，才开始构建正常的返回信息
             text = f"所有账户 *{status_text}* 的 *{task_type}* 任务:\n\n"
-            if not tasks:  # 在这里，not tasks 代表收到了一个空列表 []
-                text += "目前没有正在运行的抢占实例任务。" # 按照您的要求显示提示信息
+            if not tasks:
+                text += "目前没有正在运行的抢占实例任务。"
             else:
                 for task in tasks[:10]:
                     status_icon = ""
@@ -370,13 +387,11 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             await start_command(update, context)
         elif target == "account":
             context.user_data.clear()
-            reply_markup, text = await build_account_menu(alias)
-            await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-        elif target == "instances":
-            reply_markup, text = await build_instance_action_menu(alias)
+            context.user_data['current_alias'] = alias
+            await query.edit_message_text(f"正在为账户 *{alias}* 加载实例列表...", parse_mode=ParseMode.MARKDOWN)
+            reply_markup, text = await build_account_menu(alias, context)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
-# --- 修改点 3：确保提交逻辑正确 ---
 async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_data: dict):
     action_type = context.user_data.get('action_in_progress')
     alias = context.user_data.get('alias')
@@ -384,7 +399,6 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
     form_data.setdefault('max_delay', 90)
     payload = form_data.copy()
 
-    # 增加对 AMD 机型的特殊处理
     shape = payload.get('shape', '')
     if 'E2.1.Micro' in shape:
         payload['ocpus'] = 1
@@ -401,7 +415,6 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
                 return
                 
     payload.setdefault('os_name_version', 'Canonical Ubuntu-22.04')
-    # 恢复您原始版本中根据 action_type 选择不同 API 接口的核心逻辑
     endpoint = "create-instance" if action_type == "start_create" else "snatch-instance"
     await update.callback_query.edit_message_text(f"正在提交任务...", parse_mode=ParseMode.MARKDOWN)
     result = await api_request("POST", f"{alias}/{endpoint}", json=payload)
@@ -412,9 +425,13 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
         asyncio.create_task(poll_task_status(update.effective_chat.id, context, task_id, task_name))
     else:
         await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ 任务提交失败: {result.get('error', '未知错误')}")
+    
     context.user_data.clear()
     await asyncio.sleep(1)
-    reply_markup, text = await build_account_menu(alias)
+    
+    context.user_data['current_alias'] = alias
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="操作完成，返回账户菜单...")
+    reply_markup, text = await build_account_menu(alias, context)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 
