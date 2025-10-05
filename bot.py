@@ -156,15 +156,24 @@ async def build_main_menu():
     return InlineKeyboardMarkup(keyboard), "请选择要操作的 OCI 账户:"
 
 async def build_account_menu(alias: str, context: ContextTypes.DEFAULT_TYPE):
-    # ... 此函数无变化 ...
     instances = await api_request("GET", f"{alias}/instances")
     context.user_data['instance_list'] = instances
-    keyboard = [create_title_bar(f"账户: {alias}"),[InlineKeyboardButton("🖥️ 实例操作", callback_data=f"menu:instances:{alias}"), InlineKeyboardButton("🤖 创建及抢占实例", callback_data=f"start_snatch:{alias}")], [InlineKeyboardButton("👇 选择下方实例以执行操作 👇", callback_data="ignore")]]
+
+    keyboard = [
+        create_title_bar(f"账户: {alias}"),
+        # --- 关键修改：移除“实例操作”按钮，让“创建及抢占实例”按钮单独一行 ---
+        [
+            InlineKeyboardButton("🤖 创建及抢占实例", callback_data=f"start_snatch:{alias}")
+        ],
+        [InlineKeyboardButton("👇 选择下方实例以执行操作 👇", callback_data="ignore")]
+    ]
+    
     if isinstance(instances, list) and instances:
         for i in range(0, len(instances), 2):
             row = []
             inst1 = instances[i]
             row.append(InlineKeyboardButton(f"{inst1['display_name']} ({inst1['lifecycle_state']})", callback_data=f"exec:{i}"))
+            
             if i + 1 < len(instances):
                 inst2 = instances[i+1]
                 row.append(InlineKeyboardButton(f"{inst2['display_name']} ({inst2['lifecycle_state']})", callback_data=f"exec:{i+1}"))
@@ -174,8 +183,10 @@ async def build_account_menu(alias: str, context: ContextTypes.DEFAULT_TYPE):
     else:
         error_msg = instances.get('error', '未知错误') if isinstance(instances, dict) else '获取失败'
         keyboard.append([InlineKeyboardButton(f"❌ 获取实例列表失败: {error_msg}", callback_data="ignore")])
+
     keyboard.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data=f"back:main")])
     keyboard.append(get_footer_ruler())
+
     return InlineKeyboardMarkup(keyboard), f"已选择账户: *{alias}*\n请选择功能模块或下方的一个实例:"
 
 async def build_instance_action_menu(alias: str):
