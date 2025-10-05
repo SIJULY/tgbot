@@ -92,10 +92,8 @@ async def send_and_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: i
         sent_message = await context.bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.MARKDOWN)
         await asyncio.sleep(5)
         await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
-    except BadRequest as e:
-        logger.warning(f"无法删除临时消息: {e}")
     except Exception as e:
-        logger.error(f"发送并删除消息时出错: {e}")
+        logger.warning(f"发送或删除临时消息时出错: {e}")
 
 async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, task_id: str, task_name: str):
     max_retries, retries = 120, 0
@@ -212,13 +210,10 @@ async def build_instance_action_menu(alias: str):
     keyboard.append(get_footer_ruler())
     return InlineKeyboardMarkup(keyboard), "请选择要执行的操作："
 
-# --- 核心修改：重写 show_all_tasks 函数以匹配新样式 ---
 async def show_all_tasks(query: Update.callback_query):
     await query.edit_message_text(text="*正在查询所有抢占任务...*", parse_mode=ParseMode.MARKDOWN)
-
     running_tasks_endpoint = "tasks/snatch/running"
     completed_tasks_endpoint = "tasks/snatch/completed"
-
     try:
         running_tasks, completed_tasks = await asyncio.gather(
             api_request("GET", running_tasks_endpoint),
@@ -229,40 +224,36 @@ async def show_all_tasks(query: Update.callback_query):
         running_tasks, completed_tasks = {"error": str(e)}, {"error": str(e)}
 
     text = "❖ *所有抢占任务* ❖\n\n"
-    
-    # --- 按新样式格式化“正在运行”的任务 ---
     text += "--- 🏃 *正在运行* ---\n"
     if isinstance(running_tasks, list) and running_tasks:
+        running_tasks.reverse()
+        task_num = 1
         for task in running_tasks:
             result_str = task.get('result', '')
             try:
                 result_data = json.loads(result_str)
                 details = result_data.get('details', {})
-                
+                text += f"*--- 任务 {task_num}: ---*\n"
                 alias = f"账号：{task.get('alias', 'N/A')}"
                 shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
                 specs = f"{details.get('ocpus')}核/{details.get('memory')}GB/{details.get('boot_volume_size', '50')}GB"
                 elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
                 attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
-
-                # 拼接成最终的多行格式
-                text += (f"*{alias}*\n"
+                text += (f"{alias}\n"
                          f"机型：{shape_type}\n"
                          f"参数：{specs}\n"
                          f"运行时间：{elapsed_time}{attempt}\n\n")
-
+                task_num += 1
             except (json.JSONDecodeError, TypeError):
-                # 如果解析失败（旧格式），则使用简化格式
                 text += f"_{task.get('alias', 'N/A')}: {task.get('name', 'N/A')} - {result_str or '获取状态中...'}\n\n_"
     elif isinstance(running_tasks, dict) and "error" in running_tasks:
         text += f"❌ 查询失败: {running_tasks.get('error')}\n\n"
     else:
         text += "_没有正在运行的任务。_\n\n"
 
-    # --- 显示已完成的任务 ---
     text += "--- ✅ *已完成* ---\n"
     if isinstance(completed_tasks, list) and completed_tasks:
-        for task in completed_tasks[:5]: # 只显示最近的5条
+        for task in completed_tasks[:5]:
             status_icon = "✅" if task.get("status") == "success" else "❌"
             task_alias = task.get('alias', 'N/A')
             task_name = task.get('name', 'N/A')
@@ -279,7 +270,6 @@ async def show_all_tasks(query: Update.callback_query):
         get_footer_ruler()
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
     try:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     except BadRequest as e:
@@ -300,10 +290,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-
-    if query.data == "ignore":
-        return
-
+    if query.data == "ignore": return
     parts = query.data.split(":")
     command = parts[0]
     
@@ -312,34 +299,22 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         return
 
     if command == "perform_action":
-        action = parts[1]
-        alias = context.user_data.get('current_alias')
+        action, alias = parts[1], context.user_data.get('current_alias')
         selected_instance = context.user_data.get('selected_instance_for_action')
         chat_id = update.effective_chat.id
-
         if not all([alias, action, selected_instance]):
             asyncio.create_task(send_and_delete_message(context, chat_id, "❌ 会话已过期，请返回重试。"))
             return
-
         action_text_map = {"START": "开机", "STOP": "关机", "RESTART": "重启", "TERMINATE": "终止", "CHANGEIP": "更换IP", "ASSIGNIPV6": "分配IPv6"}
         action_text = action_text_map.get(action, action)
-
         if action in ['STOP', 'TERMINATE']:
             pending = context.user_data.get('pending_confirmation')
-            
-            if (pending and pending['action'] == action and
-                pending['instance_id'] == selected_instance['id'] and
-                (datetime.now() - pending['timestamp']).total_seconds() < 5):
-                
+            if (pending and pending['action'] == action and pending['instance_id'] == selected_instance['id'] and (datetime.now() - pending['timestamp']).total_seconds() < 5):
                 context.user_data.pop('pending_confirmation', None)
                 feedback_text = f"✅ *{action_text}* 命令已确认并发送..."
                 asyncio.create_task(send_and_delete_message(context, chat_id, feedback_text))
             else:
-                context.user_data['pending_confirmation'] = {
-                    'action': action,
-                    'instance_id': selected_instance['id'],
-                    'timestamp': datetime.now()
-                }
+                context.user_data['pending_confirmation'] = {'action': action, 'instance_id': selected_instance['id'], 'timestamp': datetime.now()}
                 warning_text = f"⚠️ *危险操作！* 请在5秒内再次点击 *{action_text}* 按钮以确认。"
                 asyncio.create_task(send_and_delete_message(context, chat_id, warning_text))
                 return
@@ -347,29 +322,21 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             feedback_text = f"✅ *{action_text}* 命令已发送..."
             asyncio.create_task(send_and_delete_message(context, chat_id, feedback_text))
         
-        instance_id = selected_instance['id']
-        instance_name = selected_instance['display_name']
-        vnic_id = selected_instance.get('vnic_id')
+        instance_id, instance_name, vnic_id = selected_instance['id'], selected_instance['display_name'], selected_instance.get('vnic_id')
         payload = {"action": action, "instance_id": instance_id, "instance_name": instance_name}
         if vnic_id: payload['vnic_id'] = vnic_id
         result = await api_request("POST", f"{alias}/instance-action", json=payload)
         if result and result.get("task_id"):
-            task_id = result.get("task_id")
-            task_name = f"{action} on {instance_name}"
-            asyncio.create_task(poll_task_status(chat_id, context, task_id, task_name))
+            asyncio.create_task(poll_task_status(chat_id, context, result.get("task_id"), f"{action} on {instance_name}"))
         else:
-            error_msg = result.get('error', '未知错误')
-            asyncio.create_task(send_and_delete_message(context, chat_id, f"❌ 命令发送失败: {error_msg}"))
+            asyncio.create_task(send_and_delete_message(context, chat_id, f"❌ 命令发送失败: {result.get('error', '未知错误')}"))
         return
 
     if command == "start_create" or command == "start_snatch":
         alias = parts[1]
         context.user_data.clear()
-        context.user_data['action_in_progress'] = command
-        context.user_data['alias'] = alias
-        prefix = "snatch"
-        timestamp = datetime.now().strftime("%m%d-%H%M")
-        auto_name = f"{prefix}-{timestamp}"
+        context.user_data.update({'action_in_progress': command, 'alias': alias})
+        auto_name = f"snatch-{datetime.now().strftime('%m%d-%H%M')}"
         context.user_data['form_data'] = {'display_name_prefix': auto_name, 'shape': 'VM.Standard.A1.Flex'}
         text, reply_markup = await build_param_selection_menu(context.user_data['form_data'], command, context)
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
@@ -378,9 +345,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     if command == "form_param":
         key, value = parts[1], parts[2]
         context.user_data['form_data'][key] = value
-        if key == 'shape':
-            context.user_data['form_data'].pop('ocpus', None)
-            context.user_data['form_data'].pop('memory_in_gbs', None)
+        if key == 'shape': context.user_data['form_data'].pop('ocpus', None); context.user_data['form_data'].pop('memory_in_gbs', None)
         action_type = context.user_data['action_in_progress']
         text, reply_markup = await build_param_selection_menu(context.user_data['form_data'], action_type, context)
         try:
@@ -401,29 +366,19 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         return
 
-    elif command == "menu":
-        menu_type, alias = parts[1], parts[2]
-        if menu_type == "instances":
-            await query.answer("请直接点击下方您想操作的实例。", show_alert=True)
-            return
-            
-    elif command == "exec":
-        instance_index = int(parts[1])
-        alias = context.user_data.get('current_alias')
+    if command == "exec":
+        instance_index, alias = int(parts[1]), context.user_data.get('current_alias')
         instance_list = context.user_data.get('instance_list')
-
         if not all([alias, instance_list is not None]):
             await query.answer("会话已过期或信息不完整，请返回重试。", show_alert=True)
             return
-        
         selected_instance = instance_list[instance_index]
         context.user_data['selected_instance_for_action'] = selected_instance 
-        
         reply_markup, text = await build_instance_action_menu(alias)
         await query.edit_message_text(f"已选择实例: *{selected_instance['display_name']}*\n请选择要执行的操作：", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         return
     
-    elif command == "back":
+    if command == "back":
         target = parts[1]
         alias = parts[2] if len(parts) > 2 else context.user_data.get('current_alias')
         if target == "main":
@@ -437,46 +392,53 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
 
 async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_data: dict):
     alias = context.user_data.get('alias')
-    await update.callback_query.edit_message_text(f"正在提交任务...", parse_mode=ParseMode.MARKDOWN)
+    chat_id = update.effective_chat.id
     
+    # 修改点1：不再就地编辑消息
+    # await update.callback_query.edit_message_text(f"正在提交任务...", parse_mode=ParseMode.MARKDOWN)
+    await update.callback_query.answer("正在提交任务...") # 使用弹窗提示
+
     payload = form_data.copy()
     payload.setdefault('min_delay', 45)
     payload.setdefault('max_delay', 90)
     if 'E2.1.Micro' in payload.get('shape', ''):
-        payload['ocpus'] = 1
-        payload['memory_in_gbs'] = 1
+        payload['ocpus'], payload['memory_in_gbs'] = 1, 1
     
     numeric_keys = ['ocpus', 'memory_in_gbs', 'boot_volume_size', 'min_delay', 'max_delay']
     for key in numeric_keys:
         if key in payload and payload[key] is not None:
             try:
-                if key in ['ocpus', 'memory_in_gbs']: payload[key] = float(payload[key])
-                else: payload[key] = int(payload[key])
+                payload[key] = float(payload[key]) if key in ['ocpus', 'memory_in_gbs'] else int(payload[key])
             except (ValueError, TypeError):
-                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ 参数 {key} 的值 `{payload[key]}` 无效。")
+                await send_and_delete_message(context, chat_id, f"❌ 参数 {key} 的值 `{payload[key]}` 无效。")
                 return
 
     payload.setdefault('os_name_version', 'Canonical Ubuntu-22.04')
     action_type = context.user_data.get('action_in_progress')
-    endpoint = "create-instance" if action_type == "start_create" else "snatch-instance"
+    endpoint = "snatch-instance" if action_type == "start_snatch" else "create-instance"
+    task_name = payload.get('display_name_prefix', 'N/A')
     
     result = await api_request("POST", f"{alias}/{endpoint}", json=payload)
+    
+    # 修改点2：提交API后，删除旧菜单
+    await update.callback_query.delete_message()
 
     if result and result.get("task_id"):
         task_id = result.get("task_id")
-        task_name = payload.get('display_name_prefix', 'N/A')
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"✅ 任务提交成功！\n任务ID: `{task_id}`", parse_mode=ParseMode.MARKDOWN)
-        asyncio.create_task(poll_task_status(update.effective_chat.id, context, task_id, task_name))
+        start_message = f"✅ *抢占任务已提交!*\n\n*账户*: `{alias}`\n*任务名称*: `{task_name}`\n\n机器人将在后台开始尝试..."
+        asyncio.create_task(send_and_delete_message(context, chat_id, start_message))
+        asyncio.create_task(poll_task_status(chat_id, context, task_id, task_name))
     else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ 任务提交失败: {result.get('error', '未知错误')}")
+        error_message = f"❌ 任务提交失败: {result.get('error', '未知错误')}"
+        asyncio.create_task(send_and_delete_message(context, chat_id, error_message))
     
     context.user_data.clear()
-    await asyncio.sleep(1)
+    
+    asyncio.create_task(send_and_delete_message(context, chat_id, "正在返回账户菜单..."))
     
     context.user_data['current_alias'] = alias
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="正在返回账户菜单...")
     reply_markup, text = await build_account_menu(alias, context)
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 
 async def post_init(application: Application):
