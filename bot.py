@@ -18,6 +18,10 @@ AUTHORIZED_USER_IDS = [123456789]
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- 2. 新增自然排序辅助函数 ---
+def natural_sort_key(s: str):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
+
 # --- 辅助函数：生成TG特定格式的运行时长 ---
 def format_elapsed_time_tg(start_time_str: str) -> str:
     try:
@@ -158,12 +162,17 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
     keyboard.append(get_footer_ruler())
     return text, InlineKeyboardMarkup(keyboard)
 
+# --- 3. 核心修改：在 build_main_menu 函数中添加排序 ---
 async def build_main_menu():
     profiles = await api_request("GET", "profiles")
     if not profiles or "error" in profiles:
         return None, f"❌ 无法从面板获取账户列表: {profiles.get('error', '未知错误') if profiles else '无响应'}"
     if not profiles:
         return None, "面板中尚未配置任何OCI账户。"
+        
+    # --- 在此处对列表进行自然排序 ---
+    profiles.sort(key=natural_sort_key)
+    
     keyboard = [create_title_bar("Cloud Manager Panel Telegram Bot"), [InlineKeyboardButton("📝 查看抢占实例任务", callback_data="tasks:all")], [InlineKeyboardButton("👇 OCI 账户选择", callback_data="ignore")]]
     for i in range(0, len(profiles), 2):
         row = [InlineKeyboardButton(profiles[i], callback_data=f"account:{profiles[i]}")]
@@ -212,8 +221,10 @@ async def build_instance_action_menu(alias: str):
 
 async def show_all_tasks(query: Update.callback_query):
     await query.edit_message_text(text="*正在查询所有抢占任务...*", parse_mode=ParseMode.MARKDOWN)
+
     running_tasks_endpoint = "tasks/snatch/running"
     completed_tasks_endpoint = "tasks/snatch/completed"
+
     try:
         running_tasks, completed_tasks = await asyncio.gather(
             api_request("GET", running_tasks_endpoint),
@@ -224,6 +235,7 @@ async def show_all_tasks(query: Update.callback_query):
         running_tasks, completed_tasks = {"error": str(e)}, {"error": str(e)}
 
     text = "❖ *所有抢占任务* ❖\n\n"
+    
     text += "--- 🏃 *正在运行* ---\n"
     if isinstance(running_tasks, list) and running_tasks:
         running_tasks.reverse()
@@ -233,12 +245,14 @@ async def show_all_tasks(query: Update.callback_query):
             try:
                 result_data = json.loads(result_str)
                 details = result_data.get('details', {})
+                
                 text += f"*--- 任务 {task_num}: ---*\n"
                 alias = f"账号：{task.get('alias', 'N/A')}"
                 shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
                 specs = f"{details.get('ocpus')}核/{details.get('memory')}GB/{details.get('boot_volume_size', '50')}GB"
                 elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
                 attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
+
                 text += (f"{alias}\n"
                          f"机型：{shape_type}\n"
                          f"参数：{specs}\n"
@@ -270,6 +284,7 @@ async def show_all_tasks(query: Update.callback_query):
         get_footer_ruler()
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
     try:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     except BadRequest as e:
@@ -394,9 +409,7 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
     alias = context.user_data.get('alias')
     chat_id = update.effective_chat.id
     
-    # 修改点1：不再就地编辑消息
-    # await update.callback_query.edit_message_text(f"正在提交任务...", parse_mode=ParseMode.MARKDOWN)
-    await update.callback_query.answer("正在提交任务...") # 使用弹窗提示
+    await update.callback_query.answer("正在提交任务...")
 
     payload = form_data.copy()
     payload.setdefault('min_delay', 45)
@@ -420,7 +433,6 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
     
     result = await api_request("POST", f"{alias}/{endpoint}", json=payload)
     
-    # 修改点2：提交API后，删除旧菜单
     await update.callback_query.delete_message()
 
     if result and result.get("task_id"):
