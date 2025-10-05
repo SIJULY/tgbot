@@ -77,48 +77,39 @@ async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, tas
 
 # --- 菜单构建函数 ---
 
+# --- 修改点 2：修改参数选择页面 ---
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
     shape = form_data.get('shape')
-    # --- 关键修改 ---
-    # 精确判断只有ARM(A1.Flex)机型才显示CPU和内存选项
-    is_flex = shape and "A1.Flex" in shape 
-    
-    text = f"⚙️ *请配置实例参数*\n*{'抢占任务' if action_type == 'start_snatch' else '创建任务'}*\n\n"
+    is_flex = shape and "Flex" in shape
+    text = f"⚙️ *请配置实例参数*\n*抢占任务*\n\n" # 简化标题
     text += f"实例名称: `{form_data.get('display_name_prefix', 'N/A')}`\n"
     
     spec_text = '尚未选择'
     if shape:
-        if 'A1.Flex' in shape:
-            spec_text = 'ARM'
-        elif 'E4.Flex' in shape:
-            spec_text = 'AMD'
+        if 'A1.Flex' in shape: spec_text = 'ARM'
+        elif 'E2.1.Micro' in shape: spec_text = 'AMD' # 使用正确的机型
     text += f"实例规格: `{spec_text}`\n"
     
     keyboard = [create_title_bar("参数配置")]
     all_params_selected = True
     
-    # 机型选择，保持一行两列
+    # --- 增加机型选择按钮 ---
     keyboard.append([InlineKeyboardButton("─── 实例机型选择 ───", callback_data="ignore")])
     shape_options = {
         "VM.Standard.A1.Flex": "ARM",
-        "VM.Standard.E4.Flex": "AMD"
+        "VM.Standard.E2.1.Micro": "AMD"
     }
-    shape_buttons = [
-        InlineKeyboardButton(
-            f"{'✅ ' if shape == k else ''}{v}",
-            callback_data=f"form_param:shape:{k}"
-        ) for k, v in shape_options.items()
-    ]
-    keyboard.append(shape_buttons)
+    shape_buttons = [InlineKeyboardButton(f"{'✅ ' if shape == k else ''}{v}", callback_data=f"form_param:shape:{k}") for k, v in shape_options.items()]
+    keyboard.append(shape_buttons) # 保持一行两列
     if not shape: all_params_selected = False
 
-    # 只有 is_flex 为 True (即选择了ARM) 时，才显示这些部分
-    if is_flex:
+    if is_flex: # 这段逻辑现在只对 ARM 生效，因为 AMD 机型名不含 Flex
         ocpu_val = form_data.get('ocpus')
         text += f"OCPU: `{ocpu_val or '尚未选择'}`\n"
         keyboard.append([InlineKeyboardButton("─── 实例CPU规格 ───", callback_data="ignore")])
         options = {"1": "1 OCPU", "2": "2 OCPU", "3": "3 OCPU", "4": "4 OCPU"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(ocpu_val) == k else ''}{v}", callback_data=f"form_param:ocpus:{k}") for k, v in options.items()]
+        # --- 改为一行四列 ---
         keyboard.append(option_buttons)
         if not ocpu_val: all_params_selected = False
 
@@ -127,21 +118,23 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
         keyboard.append([InlineKeyboardButton("─── 实例运行内存规格 ───", callback_data="ignore")])
         options = {"6": "6 GB", "12": "12 GB", "18": "18 GB", "24": "24 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(mem_val) == k else ''}{v}", callback_data=f"form_param:memory_in_gbs:{k}") for k, v in options.items()]
+        # --- 改为一行四列 ---
         keyboard.append(option_buttons)
         if not mem_val: all_params_selected = False
 
-    # 只要选择了任一机型(shape存在)，就显示硬盘大小选项
     if shape:
         disk_val = form_data.get('boot_volume_size')
         text += f"磁盘大小: `{f'{disk_val} GB' if disk_val else '尚未选择'}`\n"
         keyboard.append([InlineKeyboardButton("─── 实例硬盘大小 ───", callback_data="ignore")])
         options = {"50": "50 GB", "100": "100 GB", "150": "150 GB", "200": "200 GB"}
         option_buttons = [InlineKeyboardButton(f"{'✅ ' if str(disk_val) == k else ''}{v}", callback_data=f"form_param:boot_volume_size:{k}") for k, v in options.items()]
+        # --- 改为一行四列 ---
         keyboard.append(option_buttons)
         if not disk_val: all_params_selected = False
+    else:
+        all_params_selected = False
 
-    if action_type == 'start_snatch':
-        text += f"重试间隔: `{form_data.get('min_delay', '45')}-{form_data.get('max_delay', '90')} 秒`"
+    text += f"\n重试间隔: `{form_data.get('min_delay', '45')}-{form_data.get('max_delay', '90')} 秒`"
 
     if all_params_selected:
         keyboard.append([InlineKeyboardButton("🚀 确认提交", callback_data="form_submit")])
@@ -175,11 +168,14 @@ async def build_main_menu():
     
     return InlineKeyboardMarkup(keyboard), "请选择要操作的 OCI 账户:"
 
+# --- 修改点 1：修改账户菜单 ---
 async def build_account_menu(alias: str):
     keyboard = [
         create_title_bar(f"账户: {alias}"),
-        [InlineKeyboardButton("🖥️ 实例操作", callback_data=f"menu:instances:{alias}")],
-        [InlineKeyboardButton("➕ 创建实例", callback_data=f"start_create:{alias}"), InlineKeyboardButton("🤖 抢占实例", callback_data=f"start_snatch:{alias}")],
+        [
+            InlineKeyboardButton("🖥️ 实例操作", callback_data=f"menu:instances:{alias}"),
+            InlineKeyboardButton("🤖 创建及抢占实例", callback_data=f"start_snatch:{alias}")
+        ],
         [InlineKeyboardButton("⬅️ 返回主菜单", callback_data=f"back:main")]
     ]
     keyboard.append(get_footer_ruler())
@@ -245,7 +241,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.clear()
         context.user_data['action_in_progress'] = command
         context.user_data['alias'] = alias
-        prefix = "instance" if command == "start_create" else "snatch"
+        prefix = "snatch" # 统一使用 snatch 前缀
         timestamp = datetime.now().strftime("%m%d-%H%M")
         auto_name = f"{prefix}-{timestamp}"
         context.user_data['form_data'] = {'display_name_prefix': auto_name, 'shape': 'VM.Standard.A1.Flex'}
@@ -341,13 +337,22 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             ]
             back_keyboard = InlineKeyboardMarkup(keyboard)
 
-            if not tasks or "error" in tasks:
+            # --- 关键修正：分离错误处理和空列表处理 ---
+
+            # 1. 首先，专门检查API是否返回了错误信息
+            if isinstance(tasks, dict) and "error" in tasks:
                 await query.edit_message_text(text=f"❌ 查询任务失败: {tasks.get('error', '未知错误')}", reply_markup=back_keyboard)
                 return
             
+            # 2. 检查返回的是否是我们期望的列表类型
+            if not isinstance(tasks, list):
+                await query.edit_message_text(text=f"❌ 查询失败: API返回了意外的数据格式。", reply_markup=back_keyboard)
+                return
+
+            # 3. 在确认没有错误且格式正确后，才开始构建正常的返回信息
             text = f"所有账户 *{status_text}* 的 *{task_type}* 任务:\n\n"
-            if not tasks:
-                text += "没有找到相关任务记录。"
+            if not tasks:  # 在这里，not tasks 代表收到了一个空列表 []
+                text += "目前没有正在运行的抢占实例任务。" # 按照您的要求显示提示信息
             else:
                 for task in tasks[:10]:
                     status_icon = ""
@@ -355,6 +360,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                         status_icon = "✅" if task.get("status") == "success" else "❌"
                     task_alias = task.get('alias', 'N/A')
                     text += f"*{task.get('name')}* (账户: {task_alias}) {status_icon}:\n`{task.get('result', '无结果')}`\n\n"
+            
             await query.edit_message_text(text, reply_markup=back_keyboard, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
 
     elif command == "back":
@@ -370,12 +376,20 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             reply_markup, text = await build_instance_action_menu(alias)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
+# --- 修改点 3：确保提交逻辑正确 ---
 async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_data: dict):
     action_type = context.user_data.get('action_in_progress')
     alias = context.user_data.get('alias')
     form_data.setdefault('min_delay', 45)
     form_data.setdefault('max_delay', 90)
     payload = form_data.copy()
+
+    # 增加对 AMD 机型的特殊处理
+    shape = payload.get('shape', '')
+    if 'E2.1.Micro' in shape:
+        payload['ocpus'] = 1
+        payload['memory_in_gbs'] = 1
+
     numeric_keys = ['ocpus', 'memory_in_gbs', 'boot_volume_size', 'min_delay', 'max_delay']
     for key in numeric_keys:
         if key in payload:
@@ -385,7 +399,9 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
             except (ValueError, TypeError):
                 await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ 参数 {key} 的值 `{payload[key]}` 无效。")
                 return
+                
     payload.setdefault('os_name_version', 'Canonical Ubuntu-22.04')
+    # 恢复您原始版本中根据 action_type 选择不同 API 接口的核心逻辑
     endpoint = "create-instance" if action_type == "start_create" else "snatch-instance"
     await update.callback_query.edit_message_text(f"正在提交任务...", parse_mode=ParseMode.MARKDOWN)
     result = await api_request("POST", f"{alias}/{endpoint}", json=payload)
