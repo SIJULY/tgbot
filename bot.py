@@ -247,6 +247,7 @@ async def build_instance_action_menu(alias: str):
     keyboard.append(get_footer_ruler())
     return InlineKeyboardMarkup(keyboard), "请选择要执行的操作："
 
+
 async def show_all_tasks(query: Update.callback_query):
     await query.edit_message_text(text="*正在查询所有抢占任务...*", parse_mode=ParseMode.MARKDOWN)
 
@@ -295,12 +296,38 @@ async def show_all_tasks(query: Update.callback_query):
 
     text += "--- ✅ *已完成* ---\n"
     if isinstance(completed_tasks, list) and completed_tasks:
-        for task in completed_tasks[:5]:
+        for task in completed_tasks[:5]: # 只显示最近的5个已完成任务
             status_icon = "✅" if task.get("status") == "success" else "❌"
             task_alias = task.get('alias', 'N/A')
             task_name = task.get('name', 'N/A')
-            result_preview = task.get('result', '无结果').split('\n')[0]
-            text += f"{status_icon} *{task_name}* (_{task_alias}_)\n`{result_preview}`\n\n"
+            full_result = task.get('result', '无结果')
+
+            # <<< --- 核心修改部分：重新格式化结果 --- >>>
+            if status_icon == "✅" and "实例名" in full_result:
+                # 尝试解析成功信息，并格式化
+                lines = full_result.split('\n')
+                formatted_result_lines = []
+                for line in lines:
+                    if "- 实例名: " in line:
+                        formatted_result_lines.append(line.replace("- 实例名: ", "- 实例名: *"))
+                    elif "- 公网IP: " in line:
+                        formatted_result_lines.append(line.replace("- 公网IP: ", "- 公网IP: *"))
+                    elif "- 登陆用户名: " in line:
+                        formatted_result_lines.append(line.replace("- 登陆用户名: ", "- 登陆用户名: *"))
+                    elif "- 密码: " in line:
+                        formatted_result_lines.append(line.replace("- 密码: ", "- 密码: *") + "*") # 密码末尾也要加*
+                    else:
+                        formatted_result_lines.append(line)
+                
+                # 将格式化后的行重新组合，并确保每行末尾都有换行符
+                formatted_result = "\n".join(formatted_result_lines)
+                
+                text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{formatted_result}\n\n"
+            else:
+                # 对于非成功状态或不包含“实例名”的，保持原样（但去除代码块）
+                text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{full_result}\n\n"
+            # <<< --- 修改结束 --- >>>
+
     elif isinstance(completed_tasks, dict) and "error" in completed_tasks:
         text += f"❌ 查询失败: {completed_tasks.get('error')}\n\n"
     else:
@@ -320,6 +347,7 @@ async def show_all_tasks(query: Update.callback_query):
             logger.error(f"编辑任务消息时出错: {e}")
             await query.answer("❌ 更新消息时出错，请重试。", show_alert=True)
 
+            
 @authorized
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
