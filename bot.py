@@ -101,18 +101,44 @@ async def send_and_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: i
     except Exception as e:
         logger.warning(f"发送或删除临时消息时出错: {e}")
 
+
 async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, task_id: str, task_name: str):
     max_retries, retries = 120, 0
     while retries < max_retries:
         await asyncio.sleep(5)
+        
+        # 调用API检查任务状态
         result = await api_request("GET", f"task-status/{task_id}")
-        if result and result.get("status") in ["success", "failure"]:
-            final_message = f"🔔 *任务完成通知*\n\n*任务名称*: `{task_name}`\n\n*结果*:\n`{result.get('result')}`"
+        
+        # 如果API调用失败或没有结果，则继续下一次轮询
+        if not result or not result.get("status"):
+            retries += 1
+            continue
+
+        status = result.get("status")
+
+        # <<< --- 核心修改部分 --- >>>
+        # 1. 如果任务成功
+        if status == "success":
+            # 后端会发送格式更精美的通知，所以机器人在这里不再重复发送。
+            # 我们可以只在日志中记录一下，然后静默退出轮询即可。
+            logger.info(f"任务 {task_id} ({task_name}) 成功，由后端处理通知，机器人轮询结束。")
+            return
+
+        # 2. 如果任务失败
+        if status == "failure":
+            # 任务失败时，机器人需要发送通知，因为后端可能不会发送失败通知。
+            final_message = f"🔔 *任务失败通知*\n\n*任务名称*: `{task_name}`\n\n*原因*:\n`{result.get('result')}`"
             await context.bot.send_message(chat_id=chat_id, text=final_message, parse_mode=ParseMode.MARKDOWN)
             return
-        retries += 1
-    await context.bot.send_message(chat_id=chat_id, text=f"🔔 *任务超时*\n\n任务 `{task_name}` 轮询超时（超过10分钟），请在网页端查看最终结果。")
+        # <<< --- 修改结束 --- >>>
 
+        # 如果任务仍在运行 (pending, running等)，则增加重试次数，继续循环
+        retries += 1
+
+    # 如果循环结束仍未返回，说明任务超时
+    await context.bot.send_message(chat_id=chat_id, text=f"🔔 *任务超时*\n\n任务 `{task_name}` 轮询超时（超过10分钟），请在网页端查看最终结果。")
+    
 # --- 菜单构建函数 ---
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
     shape = form_data.get('shape')
@@ -467,3 +493,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
