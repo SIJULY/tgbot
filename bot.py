@@ -46,13 +46,21 @@ def format_elapsed_time_tg(start_time_str: str) -> str:
 def create_title_bar(title: str) -> List[InlineKeyboardButton]:
     return [InlineKeyboardButton(f"❖ {title} ❖", callback_data="ignore")]
 
-def get_footer_ruler() -> List[InlineKeyboardButton]:
-    left_button_text = "─────« Cloud"
-    right_button_text = "Manager »────"
-    return [
-        InlineKeyboardButton(left_button_text, callback_data="ignore"),
-        InlineKeyboardButton(right_button_text, callback_data="ignore")
+# --- 修改点 1: 调整页脚函数，使其能接收参数，并且默认不显示关闭按钮 ---
+def get_footer_ruler(add_close_button: bool = False) -> List[List[InlineKeyboardButton]]:
+    """
+    生成菜单页脚。
+    :param add_close_button: 如果为 True，则在底部添加“关闭窗口”按钮。
+    """
+    footer = [
+        [
+            InlineKeyboardButton("─────« Cloud", callback_data="ignore"),
+            InlineKeyboardButton("Manager »────", callback_data="ignore")
+        ]
     ]
+    if add_close_button:
+        footer.append([InlineKeyboardButton("❌ 关闭窗口", callback_data="close_window")])
+    return footer
 
 # --- API 客户端  ---
 BASE_URL = f"{PANEL_URL}/api/v1/oci"
@@ -112,7 +120,7 @@ async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, tas
         retries += 1
     await context.bot.send_message(chat_id=chat_id, text=f"🔔 *任务超时*\n\n任务 `{task_name}` 轮询超时（超过10分钟），请在网页端查看最终结果。")
 
-# --- 菜单构建函数 ---
+# --- 菜单构建函数 (已全部更新为使用新的页脚) ---
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
     shape = form_data.get('shape')
     is_flex = shape and "Flex" in shape
@@ -159,8 +167,8 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
     if all_params_selected:
         keyboard.append([InlineKeyboardButton("🚀 确认提交", callback_data="form_submit")])
     alias = context.user_data.get('alias')
-    keyboard.append([InlineKeyboardButton("❌ 取消操作", callback_data=f"back:account:{alias}")])
-    keyboard.append(get_footer_ruler())
+    keyboard.append([InlineKeyboardButton("⬅️ 返回", callback_data=f"back:account:{alias}")])
+    keyboard.extend(get_footer_ruler(add_close_button=False))
     return text, InlineKeyboardMarkup(keyboard)
 
 async def build_main_menu():
@@ -180,7 +188,7 @@ async def build_main_menu():
         if i + 1 < len(profiles):
             row.append(InlineKeyboardButton(profiles[i+1], callback_data=f"account:{profiles[i+1]}"))
         keyboard.append(row)
-    keyboard.append(get_footer_ruler())
+    keyboard.extend(get_footer_ruler(add_close_button=True)) # 只在主菜单显示关闭按钮
     return InlineKeyboardMarkup(keyboard), "请选择要操作的 OCI 账户:"
 
 async def build_account_menu(alias: str, context: ContextTypes.DEFAULT_TYPE):
@@ -206,7 +214,7 @@ async def build_account_menu(alias: str, context: ContextTypes.DEFAULT_TYPE):
         error_msg = instances.get('error', '未知错误') if isinstance(instances, dict) else '获取失败'
         keyboard.append([InlineKeyboardButton(f"❌ 获取实例列表失败: {error_msg}", callback_data="ignore")])
     keyboard.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data=f"back:main")])
-    keyboard.append(get_footer_ruler())
+    keyboard.extend(get_footer_ruler(add_close_button=False))
     return InlineKeyboardMarkup(keyboard), f"已选择账户: *{alias}*\n请选择功能模块或下方的一个实例:"
 
 async def build_instance_action_menu(alias: str):
@@ -217,44 +225,35 @@ async def build_instance_action_menu(alias: str):
         [InlineKeyboardButton("🌐 更换IP", callback_data="perform_action:CHANGEIP"), InlineKeyboardButton("🌐 分配IPv6", callback_data="perform_action:ASSIGNIPV6")],
         [InlineKeyboardButton("⬅️ 返回", callback_data=f"back:account:{alias}")],
     ]
-    keyboard.append(get_footer_ruler())
+    keyboard.extend(get_footer_ruler(add_close_button=False))
     return InlineKeyboardMarkup(keyboard), "请选择要执行的操作："
 
-# --- 分页键盘构建函数  ---
 def build_pagination_keyboard(view: str, current_page: int, total_pages: int) -> List[List[InlineKeyboardButton]]:
     keyboard = []
-    
-    # --- 视图切换按钮 ---
     running_text = "🏃 运行中的任务"
     completed_text = "✅ 已完成的任务"
     keyboard.append([
         InlineKeyboardButton(running_text, callback_data="tasks:running:1"),
         InlineKeyboardButton(completed_text, callback_data="tasks:completed:1")
     ])
-
-    # --- 翻页按钮 ---
-    nav_row = []
-    if current_page > 1:
-        nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"tasks:{view}:{current_page - 1}"))
-    
-    nav_row.append(InlineKeyboardButton(f"• {current_page}/{total_pages} •", callback_data="ignore"))
-
-    if current_page < total_pages:
-        nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"tasks:{view}:{current_page + 1}"))
-    
-    if len(nav_row) > 1:
+    if total_pages > 1:
+        nav_row = []
+        if current_page > 1:
+            nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"tasks:{view}:{current_page - 1}"))
+        else:
+            nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data="ignore"))
+        nav_row.append(InlineKeyboardButton(f"• {current_page}/{total_pages} •", callback_data="ignore"))
+        if current_page < total_pages:
+            nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"tasks:{view}:{current_page + 1}"))
+        else:
+            nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data="ignore"))
         keyboard.append(nav_row)
-
-    # --- 返回主菜单和页脚 ---
-    keyboard.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back:main")])
-    keyboard.append(get_footer_ruler())
-
+    keyboard.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data=f"back:main")])
+    keyboard.extend(get_footer_ruler(add_close_button=False))
     return keyboard
 
-# --- show_all_tasks 函数 ---
 async def show_all_tasks(query: Update.callback_query, view: str = 'running', page: int = 1):
     await query.edit_message_text(text="*正在查询所有抢占任务...*", parse_mode=ParseMode.MARKDOWN)
-
     try:
         running_tasks, completed_tasks = await asyncio.gather(
             api_request("GET", "tasks/snatch/running"),
@@ -262,9 +261,10 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
         )
     except Exception as e:
         logger.error(f"获取任务列表时API请求失败: {e}")
-        await query.edit_message_text(f"❌ 获取任务列表失败: {e}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back:main")]]))
+        keyboard = [[InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back:main")]]
+        keyboard.extend(get_footer_ruler(add_close_button=False))
+        await query.edit_message_text(f"❌ 获取任务列表失败: {e}", reply_markup=InlineKeyboardMarkup(keyboard))
         return
-
     source_list, title = [], ""
     if view == 'running':
         source_list = running_tasks if isinstance(running_tasks, list) else []
@@ -273,18 +273,14 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
     elif view == 'completed':
         source_list = completed_tasks if isinstance(completed_tasks, list) else []
         title = ""
-
     total_items = len(source_list)
     total_pages = (total_items + TASKS_PER_PAGE - 1) // TASKS_PER_PAGE if total_items > 0 else 1
     page = max(1, min(page, total_pages))
     start_index = (page - 1) * TASKS_PER_PAGE
     end_index = start_index + TASKS_PER_PAGE
     tasks_on_page = source_list[start_index:end_index]
-
-    # --- 标题 ---
     text = f"❖ *任务详情* ❖  (第 {page}/{total_pages} 页)\n\n"
     text += title
-
     if not tasks_on_page:
         text += "_当前分类下没有任务记录。_\n\n"
     else:
@@ -306,13 +302,11 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                              f"运行时间：{elapsed_time}{attempt}\n\n")
                 except (json.JSONDecodeError, TypeError):
                     text += f"_{task.get('alias', 'N/A')}: {task.get('name', 'N/A')} - {result_str or '获取状态中...'}\n\n_"
-            
             elif view == 'completed':
                 status_icon = "✅" if task.get("status") == "success" else "❌"
                 task_alias = task.get('alias', 'N/A')
                 task_name = task.get('name', 'N/A')
                 full_result = task.get('result', '无结果')
-                
                 param_text = ""
                 details = task.get('details', {}) 
                 if details and isinstance(details, dict):
@@ -323,11 +317,8 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                     except Exception as e:
                         logger.warning(f"无法格式化已完成任务的参数: {e}")
                         param_text = ""
-                
                 text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{param_text}{full_result}\n\n"
-
     reply_markup = InlineKeyboardMarkup(build_pagination_keyboard(view, page, total_pages))
-    
     try:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
     except BadRequest as e:
@@ -339,11 +330,21 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
 @authorized
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
-    reply_markup, text = await build_main_menu()
+    
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        try:
+            await update.callback_query.message.delete()
+        except BadRequest:
+            pass
+    if update.message:
+        try:
+            await update.message.delete()
+        except BadRequest:
+            pass
+
+    reply_markup, text = await build_main_menu()
+    
+    await update.effective_chat.send_message(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 @authorized
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -351,6 +352,17 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     await query.answer()
     if query.data == "ignore": return
     
+    if query.data == "close_window":
+        try:
+            await query.message.delete()
+        except BadRequest as e:
+            if "Message to delete not found" in str(e):
+                await query.answer("窗口已被关闭。")
+            else:
+                logger.error(f"关闭窗口时出错: {e}")
+                await query.answer("❌ 关闭窗口失败。", show_alert=True)
+        return
+
     parts = query.data.split(":")
     command = parts[0]
     
@@ -442,10 +454,10 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     
     if command == "back":
         target = parts[1]
-        alias = parts[2] if len(parts) > 2 else context.user_data.get('current_alias')
         if target == "main":
             await start_command(update, context)
         elif target == "account":
+            alias = parts[2] if len(parts) > 2 else context.user_data.get('current_alias')
             context.user_data.clear()
             context.user_data['current_alias'] = alias
             await query.edit_message_text(f"正在为账户 *{alias}* 加载实例列表...", parse_mode=ParseMode.MARKDOWN)
@@ -490,8 +502,21 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
     reply_markup, text = await build_account_menu(alias, context)
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
+# --- 修改点 2: 彻底修正左下角菜单按钮的行为 ---
 async def post_init(application: Application):
-    await application.bot.set_my_commands([BotCommand("start", "打开主菜单")])
+    """
+    在机器人启动后，设置其命令和菜单按钮。
+    """
+    # 1. 定义一个对用户可见的命令列表
+    commands = [
+        BotCommand("start", "主菜单")  # 将描述文字直接放在这里
+    ]
+    await application.bot.set_my_commands(commands)
+    
+    #    将左下角的菜单按钮明确设置为默认类型。
+    #    这会告诉客户端显示一个通用的菜单图标 (≡)，
+    #    点击后，由于我们只有一个命令，它会直接发送 /start
+    await application.bot.set_chat_menu_button(menu_button=MenuButtonDefault())
 
 def main() -> None:
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
