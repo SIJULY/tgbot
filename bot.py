@@ -42,7 +42,10 @@ def format_elapsed_time_tg(start_time_str: str) -> str:
         if days > 0: parts.append(f"{days}天")
         if hours > 0: parts.append(f"{hours}小时")
         if minutes > 0: parts.append(f"{minutes}分")
-        if seconds > 0 or not parts: parts.append(f"{seconds}秒")
+        
+        # 如果 parts 为空 (说明总时长小于1分钟), 显示一个提示
+        if not parts:
+            return "不到1分钟"
         
         return "".join(parts)
     except (ValueError, TypeError):
@@ -302,9 +305,7 @@ async def show_all_tasks(query: Update.callback_query):
             task_name = task.get('name', 'N/A')
             full_result = task.get('result', '无结果')
 
-            # <<< --- 核心修改部分：重新格式化结果 --- >>>
             if status_icon == "✅" and "实例名" in full_result:
-                # 尝试解析成功信息，并格式化
                 lines = full_result.split('\n')
                 formatted_result_lines = []
                 for line in lines:
@@ -315,28 +316,26 @@ async def show_all_tasks(query: Update.callback_query):
                     elif "- 登陆用户名: " in line:
                         formatted_result_lines.append(line.replace("- 登陆用户名: ", "- 登陆用户名: *"))
                     elif "- 密码: " in line:
-                        formatted_result_lines.append(line.replace("- 密码: ", "- 密码: *") + "*") # 密码末尾也要加*
+                        formatted_result_lines.append(line.replace("- 密码: ", "- 密码: *") + "*")
                     else:
                         formatted_result_lines.append(line)
                 
-                # 将格式化后的行重新组合，并确保每行末尾都有换行符
                 formatted_result = "\n".join(formatted_result_lines)
                 
                 text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{formatted_result}\n\n"
             else:
-                # 对于非成功状态或不包含“实例名”的，保持原样（但去除代码块）
                 text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{full_result}\n\n"
-            # <<< --- 修改结束 --- >>>
 
     elif isinstance(completed_tasks, dict) and "error" in completed_tasks:
         text += f"❌ 查询失败: {completed_tasks.get('error')}\n\n"
     else:
         text += "_没有已完成的任务记录。_\n\n"
 
+    # --- 这里是核心修改 ---
     keyboard = [
         [InlineKeyboardButton("🔄 刷新", callback_data="tasks:all")],
         [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back:main")],
-        get_footer_ruler()
+        get_footer_ruler() # 添加页脚以统一UI宽度
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -521,4 +520,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
