@@ -20,7 +20,7 @@ AUTHORIZED_USER_IDS = [123456789]
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- 2. 新增自然排序辅助函数 ---
+# --- 自然排序辅助函数 ---
 def natural_sort_key(s: str):
     return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
 
@@ -43,14 +43,12 @@ def format_elapsed_time_tg(start_time_str: str) -> str:
         if hours > 0: parts.append(f"{hours}小时")
         if minutes > 0: parts.append(f"{minutes}分")
         
-        # 如果 parts 为空 (说明总时长小于1分钟), 显示一个提示
         if not parts:
             return "不到1分钟"
         
         return "".join(parts)
     except (ValueError, TypeError):
         return "未知"
-
 
 # --- UI辅助函数 ---
 def create_title_bar(title: str) -> List[InlineKeyboardButton]:
@@ -63,7 +61,6 @@ def get_footer_ruler() -> List[InlineKeyboardButton]:
         InlineKeyboardButton(left_button_text, callback_data="ignore"),
         InlineKeyboardButton(right_button_text, callback_data="ignore")
     ]
-
 
 # --- API 客户端 ---
 BASE_URL = f"{PANEL_URL}/api/v1/oci"
@@ -85,7 +82,7 @@ async def api_request(method: str, endpoint: str, **kwargs):
             logger.error(f"Request failed: {e}")
             return {"error": str(e)}
 
-# --- Telegram 机器人逻辑 ---
+# --- Telegram 机器人逻辑 (未修改部分) ---
 def authorized(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user_id = update.effective_user.id
@@ -104,45 +101,26 @@ async def send_and_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: i
     except Exception as e:
         logger.warning(f"发送或删除临时消息时出错: {e}")
 
-
 async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, task_id: str, task_name: str):
     max_retries, retries = 120, 0
     while retries < max_retries:
         await asyncio.sleep(5)
-        
-        # 调用API检查任务状态
         result = await api_request("GET", f"task-status/{task_id}")
-        
-        # 如果API调用失败或没有结果，则继续下一次轮询
         if not result or not result.get("status"):
             retries += 1
             continue
-
         status = result.get("status")
-
-        # <<< --- 核心修改部分 --- >>>
-        # 1. 如果任务成功
         if status == "success":
-            # 后端会发送格式更精美的通知，所以机器人在这里不再重复发送。
-            # 我们可以只在日志中记录一下，然后静默退出轮询即可。
             logger.info(f"任务 {task_id} ({task_name}) 成功，由后端处理通知，机器人轮询结束。")
             return
-
-        # 2. 如果任务失败
         if status == "failure":
-            # 任务失败时，机器人需要发送通知，因为后端可能不会发送失败通知。
             final_message = f"🔔 *任务失败通知*\n\n*任务名称*: `{task_name}`\n\n*原因*:\n`{result.get('result')}`"
             await context.bot.send_message(chat_id=chat_id, text=final_message, parse_mode=ParseMode.MARKDOWN)
             return
-        # <<< --- 修改结束 --- >>>
-
-        # 如果任务仍在运行 (pending, running等)，则增加重试次数，继续循环
         retries += 1
-
-    # 如果循环结束仍未返回，说明任务超时
     await context.bot.send_message(chat_id=chat_id, text=f"🔔 *任务超时*\n\n任务 `{task_name}` 轮询超时（超过10分钟），请在网页端查看最终结果。")
     
-# --- 菜单构建函数 ---
+# --- 菜单构建函数 (未修改部分) ---
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
     shape = form_data.get('shape')
     is_flex = shape and "Flex" in shape
@@ -193,18 +171,22 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
     keyboard.append(get_footer_ruler())
     return text, InlineKeyboardMarkup(keyboard)
 
-# --- 3. 核心修改：在 build_main_menu 函数中添加排序 ---
+# --- 主菜单构建函数 (入口按钮已修改) ---
 async def build_main_menu():
     profiles = await api_request("GET", "profiles")
     if not profiles or "error" in profiles:
         return None, f"❌ 无法从面板获取账户列表: {profiles.get('error', '未知错误') if profiles else '无响应'}"
     if not profiles:
         return None, "面板中尚未配置任何OCI账户。"
-        
-    # --- 在此处对列表进行自然排序 ---
+    
     profiles.sort(key=natural_sort_key)
     
-    keyboard = [create_title_bar("Cloud Manager Panel Telegram Bot"), [InlineKeyboardButton("📝 查看抢占实例任务", callback_data="tasks:all")], [InlineKeyboardButton("👇 OCI 账户选择", callback_data="ignore")]]
+    keyboard = [
+        create_title_bar("Cloud Manager Panel Telegram Bot"),
+        # --- 修改入口点，默认进入“运行中”任务列表第1页 ---
+        [InlineKeyboardButton("📝 查看抢占实例任务", callback_data="tasks:running:1")],
+        [InlineKeyboardButton("👇 OCI 账户选择", callback_data="ignore")]
+    ]
     for i in range(0, len(profiles), 2):
         row = [InlineKeyboardButton(profiles[i], callback_data=f"account:{profiles[i]}")]
         if i + 1 < len(profiles):
@@ -213,6 +195,7 @@ async def build_main_menu():
     keyboard.append(get_footer_ruler())
     return InlineKeyboardMarkup(keyboard), "请选择要操作的 OCI 账户:"
 
+# --- 账户菜单和实例操作菜单 (未修改) ---
 async def build_account_menu(alias: str, context: ContextTypes.DEFAULT_TYPE):
     instances = await api_request("GET", f"{alias}/instances")
     context.user_data['instance_list'] = instances
@@ -250,94 +233,103 @@ async def build_instance_action_menu(alias: str):
     keyboard.append(get_footer_ruler())
     return InlineKeyboardMarkup(keyboard), "请选择要执行的操作："
 
+# --- 新增：分页键盘构建函数 ---
+def build_pagination_keyboard(view: str, current_page: int, total_pages: int) -> List[List[InlineKeyboardButton]]:
+    keyboard = []
+    
+    # --- 1. 视图切换按钮 ---
+    running_text = "▶️ 运行中的任务" if view == 'running' else "运行中的任务"
+    completed_text = "▶️ 已完成的任务" if view == 'completed' else "已完成的任务"
+    keyboard.append([
+        InlineKeyboardButton(running_text, callback_data="tasks:running:1"),
+        InlineKeyboardButton(completed_text, callback_data="tasks:completed:1")
+    ])
 
-async def show_all_tasks(query: Update.callback_query):
+    # --- 2. 翻页按钮 ---
+    nav_row = []
+    if current_page > 1:
+        nav_row.append(InlineKeyboardButton("⬅️ 上一页", callback_data=f"tasks:{view}:{current_page - 1}"))
+    
+    nav_row.append(InlineKeyboardButton(f"• {current_page}/{total_pages} •", callback_data="ignore"))
+
+    if current_page < total_pages:
+        nav_row.append(InlineKeyboardButton("下一页 ➡️", callback_data=f"tasks:{view}:{current_page + 1}"))
+    
+    if len(nav_row) > 1: # 只有在有翻页按钮时才显示这一行
+        keyboard.append(nav_row)
+
+    # --- 3. 返回主菜单和页脚 ---
+    keyboard.append([InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back:main")])
+    keyboard.append(get_footer_ruler())
+
+    return keyboard
+
+# --- 全面重构：show_all_tasks 函数 ---
+async def show_all_tasks(query: Update.callback_query, view: str = 'running', page: int = 1):
     await query.edit_message_text(text="*正在查询所有抢占任务...*", parse_mode=ParseMode.MARKDOWN)
-
-    running_tasks_endpoint = "tasks/snatch/running"
-    completed_tasks_endpoint = "tasks/snatch/completed"
 
     try:
         running_tasks, completed_tasks = await asyncio.gather(
-            api_request("GET", running_tasks_endpoint),
-            api_request("GET", completed_tasks_endpoint)
+            api_request("GET", "tasks/snatch/running"),
+            api_request("GET", "tasks/snatch/completed")
         )
     except Exception as e:
         logger.error(f"获取任务列表时API请求失败: {e}")
-        running_tasks, completed_tasks = {"error": str(e)}, {"error": str(e)}
+        await query.edit_message_text(f"❌ 获取任务列表失败: {e}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back:main")]]))
+        return
 
-    text = "❖ *所有抢占任务* ❖\n\n"
-    
-    text += "--- 🏃 *正在运行* ---\n"
-    if isinstance(running_tasks, list) and running_tasks:
-        running_tasks.reverse()
-        task_num = 1
-        for task in running_tasks:
-            result_str = task.get('result', '')
-            try:
-                result_data = json.loads(result_str)
-                details = result_data.get('details', {})
-                
-                text += f"*--- 任务 {task_num}: ---*\n"
-                alias = f"账号：{task.get('alias', 'N/A')}"
-                shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
-                specs = f"{details.get('ocpus')}核/{details.get('memory')}GB/{details.get('boot_volume_size', '50')}GB"
-                elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
-                attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
+    # --- 根据视图选择数据源 ---
+    source_list, title = [], ""
+    if view == 'running':
+        source_list = running_tasks if isinstance(running_tasks, list) else []
+        source_list.reverse() # 正在运行的任务，最新的在最前
+        title = "--- 🏃 *正在运行* ---\n"
+    elif view == 'completed':
+        source_list = completed_tasks if isinstance(completed_tasks, list) else []
+        title = "--- ✅ *已完成* ---\n"
 
-                text += (f"{alias}\n"
-                         f"机型：{shape_type}\n"
-                         f"参数：{specs}\n"
-                         f"运行时间：{elapsed_time}{attempt}\n\n")
-                task_num += 1
-            except (json.JSONDecodeError, TypeError):
-                text += f"_{task.get('alias', 'N/A')}: {task.get('name', 'N/A')} - {result_str or '获取状态中...'}\n\n_"
-    elif isinstance(running_tasks, dict) and "error" in running_tasks:
-        text += f"❌ 查询失败: {running_tasks.get('error')}\n\n"
+    # --- 分页计算 ---
+    total_items = len(source_list)
+    total_pages = (total_items + TASKS_PER_PAGE - 1) // TASKS_PER_PAGE if total_items > 0 else 1
+    page = max(1, min(page, total_pages)) # 确保页码在有效范围内
+    start_index = (page - 1) * TASKS_PER_PAGE
+    end_index = start_index + TASKS_PER_PAGE
+    tasks_on_page = source_list[start_index:end_index]
+
+    # --- 构建消息文本 ---
+    text = f"❖ *所有抢占任务* ❖  (第 {page}/{total_pages} 页)\n\n"
+    text += title
+
+    if not tasks_on_page:
+        text += "_当前分类下没有任务记录。_\n\n"
     else:
-        text += "_没有正在运行的任务。_\n\n"
-
-    text += "--- ✅ *已完成* ---\n"
-    if isinstance(completed_tasks, list) and completed_tasks:
-        for task in completed_tasks[:5]: # 只显示最近的5个已完成任务
-            status_icon = "✅" if task.get("status") == "success" else "❌"
-            task_alias = task.get('alias', 'N/A')
-            task_name = task.get('name', 'N/A')
-            full_result = task.get('result', '无结果')
-
-            if status_icon == "✅" and "实例名" in full_result:
-                lines = full_result.split('\n')
-                formatted_result_lines = []
-                for line in lines:
-                    if "- 实例名: " in line:
-                        formatted_result_lines.append(line.replace("- 实例名: ", "- 实例名: *"))
-                    elif "- 公网IP: " in line:
-                        formatted_result_lines.append(line.replace("- 公网IP: ", "- 公网IP: *"))
-                    elif "- 登陆用户名: " in line:
-                        formatted_result_lines.append(line.replace("- 登陆用户名: ", "- 登陆用户名: *"))
-                    elif "- 密码: " in line:
-                        formatted_result_lines.append(line.replace("- 密码: ", "- 密码: *") + "*")
-                    else:
-                        formatted_result_lines.append(line)
-                
-                formatted_result = "\n".join(formatted_result_lines)
-                
-                text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{formatted_result}\n\n"
-            else:
+        for task in tasks_on_page:
+            if view == 'running':
+                result_str = task.get('result', '')
+                try:
+                    result_data = json.loads(result_str)
+                    details = result_data.get('details', {})
+                    alias = f"账号：{task.get('alias', 'N/A')}"
+                    shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
+                    specs = f"{details.get('ocpus')}核/{details.get('memory')}GB/{details.get('boot_volume_size', '50')}GB"
+                    elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
+                    attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
+                    text += (f"*{task.get('name', 'N/A')}*\n"
+                             f"{alias}\n"
+                             f"机型：{shape_type}\n"
+                             f"参数：{specs}\n"
+                             f"运行时间：{elapsed_time}{attempt}\n\n")
+                except (json.JSONDecodeError, TypeError):
+                    text += f"_{task.get('alias', 'N/A')}: {task.get('name', 'N/A')} - {result_str or '获取状态中...'}\n\n_"
+            elif view == 'completed':
+                status_icon = "✅" if task.get("status") == "success" else "❌"
+                task_alias = task.get('alias', 'N/A')
+                task_name = task.get('name', 'N/A')
+                full_result = task.get('result', '无结果')
                 text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{full_result}\n\n"
 
-    elif isinstance(completed_tasks, dict) and "error" in completed_tasks:
-        text += f"❌ 查询失败: {completed_tasks.get('error')}\n\n"
-    else:
-        text += "_没有已完成的任务记录。_\n\n"
-
-    # --- 这里是核心修改 ---
-    keyboard = [
-        [InlineKeyboardButton("🔄 刷新", callback_data="tasks:all")],
-        [InlineKeyboardButton("⬅️ 返回主菜单", callback_data="back:main")],
-        get_footer_ruler() # 添加页脚以统一UI宽度
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # --- 构建键盘 ---
+    reply_markup = InlineKeyboardMarkup(build_pagination_keyboard(view, page, total_pages))
     
     try:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
@@ -346,7 +338,7 @@ async def show_all_tasks(query: Update.callback_query):
             logger.error(f"编辑任务消息时出错: {e}")
             await query.answer("❌ 更新消息时出错，请重试。", show_alert=True)
 
-            
+# --- 命令和回调处理器 (回调逻辑已修改) ---
 @authorized
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.clear()
@@ -361,11 +353,15 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
     if query.data == "ignore": return
+    
     parts = query.data.split(":")
     command = parts[0]
     
+    # --- 修改：处理带分页和视图参数的任务回调 ---
     if command == "tasks":
-        await show_all_tasks(query)
+        view = parts[1] if len(parts) > 1 else 'running'
+        page = int(parts[2]) if len(parts) > 2 else 1
+        await show_all_tasks(query, view, page)
         return
 
     if command == "perform_action":
@@ -460,6 +456,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             reply_markup, text = await build_account_menu(alias, context)
             await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
+# --- 表单提交 ---
 async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_data: dict):
     alias = context.user_data.get('alias')
     chat_id = update.effective_chat.id
@@ -507,7 +504,7 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
     reply_markup, text = await build_account_menu(alias, context)
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
-
+# --- 主程序入口 (未修改) ---
 async def post_init(application: Application):
     await application.bot.set_my_commands([BotCommand("start", "打开主菜单")])
 
