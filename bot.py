@@ -2,19 +2,20 @@ import asyncio
 import httpx
 import logging
 import json
-import re # <<< 1. 新增导入 re 模块
+import re
 from datetime import datetime, timezone
-from typing import List
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from typing import List, Dict, Any
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, MenuButtonDefault
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 
-# --- 配置信息 ---
+# --- 1. 配置信息 ---
 PANEL_URL = "Your Panel URL Placeholder"
 PANEL_API_KEY = "Your API Key Placeholder"
 BOT_TOKEN = "Your Bot Token Placeholder"
 AUTHORIZED_USER_IDS = [123456789]
+TASKS_PER_PAGE = 2
 
 # --- 日志配置 ---
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -173,10 +174,11 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
 
 async def build_main_menu():
     profiles = await api_request("GET", "profiles")
-    if not profiles or "error" in profiles:
-        return None, f"❌ 无法从面板获取账户列表: {profiles.get('error', '未知错误') if profiles else '无响应'}"
     if not profiles:
         return None, "面板中尚未配置任何OCI账户。"
+    if "error" in profiles:
+        return None, f"❌ 无法从面板获取账户列表: {profiles.get('error', '未知错误') if profiles else '无响应'}"
+    
     profiles.sort(key=natural_sort_key)
     keyboard = [
         create_title_bar("Cloud Manager Panel Telegram Bot"),
