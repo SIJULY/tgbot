@@ -174,11 +174,10 @@ async def build_param_selection_menu(form_data: dict, action_type: str, context:
 
 async def build_main_menu():
     profiles = await api_request("GET", "profiles")
+    if not profiles or "error" in profiles:
+        return None, f"❌ 无法从面板获取账户列表: {profiles.get('error', '未知错误') if profiles else '无响应'}"
     if not profiles:
         return None, "面板中尚未配置任何OCI账户。"
-    if "error" in profiles:
-        return None, f"❌ 无法从面板获取账户列表: {profiles.get('error', '未知错误') if profiles else '无响应'}"
-    
     profiles.sort(key=natural_sort_key)
     keyboard = [
         create_title_bar("Cloud Manager Panel Telegram Bot"),
@@ -308,7 +307,18 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                 status_icon = "✅" if task.get("status") == "success" else "❌"
                 task_alias = task.get('alias', 'N/A')
                 task_name = task.get('name', 'N/A')
-                full_result = task.get('result', '无结果')
+                
+                # --- ✨ MODIFICATION START ✨ ---
+                # Get the original result string
+                original_result = task.get('result', '无结果')
+                # Split the result into lines
+                lines = original_result.split('\n')
+                # Filter out the line containing "可用区" (Availability Zone)
+                filtered_lines = [line for line in lines if '可用区' not in line]
+                # Join the remaining lines back into a single string
+                full_result = '\n'.join(filtered_lines)
+                # --- ✨ MODIFICATION END ✨ ---
+
                 param_text = ""
                 details = task.get('details', {}) 
                 if details and isinstance(details, dict):
@@ -327,7 +337,7 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
         if "Message is not modified" not in str(e):
             logger.error(f"编辑任务消息时出错: {e}")
             await query.answer("❌ 更新消息时出错，请重试。", show_alert=True)
-
+            
 # --- 命令和回调处理器  ---
 @authorized
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
