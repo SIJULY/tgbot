@@ -296,7 +296,9 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                     specs = f"{details.get('ocpus')}核/{details.get('memory')}GB/{details.get('boot_volume_size', '50')}GB"
                     elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
                     attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
-                    text += (f"*{task.get('name', 'N/A')}*\n"
+                    # --- ✨ MODIFICATION START ✨ ---
+                    text += (f"🚀 *{task.get('name', 'N/A')}*\n"
+                    # --- ✨ MODIFICATION END ✨ ---
                              f"{alias}\n"
                              f"机型：{shape_type}\n"
                              f"参数：{specs}\n"
