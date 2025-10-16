@@ -293,12 +293,13 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                     details = result_data.get('details', {})
                     alias = f"账号：{task.get('alias', 'N/A')}"
                     shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
-                    specs = f"{details.get('ocpus')}核/{details.get('memory')}GB/{details.get('boot_volume_size', '50')}GB"
+                    # --- ✨ BUG FIX START ✨ ---
+                    # Corrected the key from 'memory' to 'memory_in_gbs' to fetch the correct value.
+                    specs = f"{details.get('ocpus')}核/{details.get('memory_in_gbs')}GB/{details.get('boot_volume_size', '50')}GB"
+                    # --- ✨ BUG FIX END ✨ ---
                     elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
                     attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
-                    # --- ✨ MODIFICATION START ✨ ---
-                    text += (f"🚀 *{task.get('name', 'N/A')}*\n"
-                    # --- ✨ MODIFICATION END ✨ ---
+                    text += (f"🏃 *{task.get('name', 'N/A')}*\n"
                              f"{alias}\n"
                              f"机型：{shape_type}\n"
                              f"参数：{specs}\n"
