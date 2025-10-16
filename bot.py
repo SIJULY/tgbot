@@ -253,6 +253,8 @@ def build_pagination_keyboard(view: str, current_page: int, total_pages: int) ->
     keyboard.extend(get_footer_ruler(add_close_button=False))
     return keyboard
 
+# 在 bot.py 中
+
 async def show_all_tasks(query: Update.callback_query, view: str = 'running', page: int = 1):
     await query.edit_message_text(text="*正在查询所有抢占任务...*", parse_mode=ParseMode.MARKDOWN)
     try:
@@ -291,43 +293,45 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                 try:
                     result_data = json.loads(result_str)
                     details = result_data.get('details', {})
-                    alias = f"账号：{task.get('alias', 'N/A')}"
+                    # --- ✅ 修复 #1: 将 'alias' 修改为 'account_alias' ---
+                    alias = f"账号：{task.get('account_alias', 'N/A')}"
                     shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
-                    # --- ✨ BUG FIX START ✨ ---
-                    # Corrected the key from 'memory' to 'memory_in_gbs' to fetch the correct value.
                     specs = f"{details.get('ocpus')}核/{details.get('memory_in_gbs')}GB/{details.get('boot_volume_size', '50')}GB"
-                    # --- ✨ BUG FIX END ✨ ---
                     elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
                     attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
                     text += (f"🏃 *{task.get('name', 'N/A')}*\n"
                              f"{alias}\n"
                              f"机型：{shape_type}\n"
                              f"参数：{specs}\n"
-                             f"运行时间：{elapsed_time}{attempt}\n\n")
+                             f"用时：{elapsed_time}{attempt}\n\n")
                 except (json.JSONDecodeError, TypeError):
-                    text += f"_{task.get('alias', 'N/A')}: {task.get('name', 'N/A')} - {result_str or '获取状态中...'}\n\n_"
+                    text += f"_{task.get('account_alias', 'N/A')}: {task.get('name', 'N/A')} - {result_str or '获取状态中...'}\n\n_"
             elif view == 'completed':
                 status_icon = "✅" if task.get("status") == "success" else "❌"
-                task_alias = task.get('alias', 'N/A')
+                # --- ✅ 修复 #1 (同样应用于此): 将 'alias' 修改为 'account_alias' ---
+                task_alias = task.get('account_alias', 'N/A')
                 task_name = task.get('name', 'N/A')
                 
-                # --- ✨ MODIFICATION START ✨ ---
-                # Get the original result string
                 original_result = task.get('result', '无结果')
-                # Split the result into lines
                 lines = original_result.split('\n')
-                # Filter out the line containing "可用区" (Availability Zone)
                 filtered_lines = [line for line in lines if '可用区' not in line]
-                # Join the remaining lines back into a single string
                 full_result = '\n'.join(filtered_lines)
-                # --- ✨ MODIFICATION END ✨ ---
 
                 param_text = ""
-                details = task.get('details', {}) 
-                if details and isinstance(details, dict):
+                # 这部分逻辑用于解析可能存在的旧任务格式中的 details
+                details_str = task.get('details') 
+                details = {}
+                if details_str and isinstance(details_str, str):
+                    try: details = json.loads(details_str)
+                    except: pass
+                elif isinstance(details_str, dict):
+                    details = details_str
+
+                if details:
                     try:
                         shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
-                        specs = f"{details.get('ocpus')}核/{details.get('memory')}GB/{details.get('boot_volume_size', '50')}GB"
+                        # --- ✅ 修复 #2: 将 'memory' 修改为 'memory_in_gbs' ---
+                        specs = f"{details.get('ocpus')}核/{details.get('memory_in_gbs')}GB/{details.get('boot_volume_size', '50')}GB"
                         param_text = f"机型：{shape_type}\n参数：{specs}\n"
                     except Exception as e:
                         logger.warning(f"无法格式化已完成任务的参数: {e}")
