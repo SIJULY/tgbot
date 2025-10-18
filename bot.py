@@ -295,8 +295,20 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                     details = result_data.get('details', {})
                     # --- ✅ 修复 #1: 将 'alias' 修改为 'account_alias' ---
                     alias = f"账号：{task.get('account_alias', 'N/A')}"
-                    shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
-                    specs = f"{details.get('ocpus')}核/{details.get('memory_in_gbs')}GB/{details.get('boot_volume_size', '50')}GB"
+                    shape = details.get('shape', '')
+                    shape_type = "ARM" if "A1" in shape else "AMD"
+                    
+                    # --- ✨ 新增的修正逻辑 开始 ✨ ---
+                    ocpus = details.get('ocpus')
+                    memory_in_gbs = details.get('memory_in_gbs')
+                    boot_volume_size = details.get('boot_volume_size', 50) # 使用数字50作为默认值
+                    
+                    if 'E2.1.Micro' in shape:
+                        ocpus = ocpus or 1
+                        memory_in_gbs = memory_in_gbs or 1
+                    # --- ✨ 新增的修正逻辑 结束 ✨ ---
+
+                    specs = f"{ocpus} Ocpu / {memory_in_gbs} GB / {boot_volume_size} GB"
                     elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
                     attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
                     text += (f"🏃 *{task.get('name', 'N/A')}*\n"
@@ -329,9 +341,20 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
 
                 if details:
                     try:
-                        shape_type = "ARM" if "A1" in details.get('shape', '') else "AMD"
-                        # --- ✅ 修复 #2: 将 'memory' 修改为 'memory_in_gbs' ---
-                        specs = f"{details.get('ocpus')}核/{details.get('memory_in_gbs')}GB/{details.get('boot_volume_size', '50')}GB"
+                        shape = details.get('shape', '')
+                        shape_type = "ARM" if "A1" in shape else "AMD"
+                        
+                        # --- ✨ 新增的修正逻辑 开始 ✨ ---
+                        ocpus = details.get('ocpus')
+                        memory_in_gbs = details.get('memory_in_gbs')
+                        boot_volume_size = details.get('boot_volume_size', 50)
+
+                        if 'E2.1.Micro' in shape:
+                            ocpus = ocpus or 1
+                            memory_in_gbs = memory_in_gbs or 1
+                        # --- ✨ 新增的修正逻辑 结束 ✨ ---
+
+                        specs = f"{ocpus}ocpu/{memory_in_gbs}GB/{boot_volume_size}GB"
                         param_text = f"机型：{shape_type}\n参数：{specs}\n"
                     except Exception as e:
                         logger.warning(f"无法格式化已完成任务的参数: {e}")
