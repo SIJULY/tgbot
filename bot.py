@@ -44,15 +44,43 @@ def format_elapsed_time_tg(start_time_str: str) -> str:
     except (ValueError, TypeError):
         return "未知"
 
+def format_duration_tg(start_time_str: str, end_time_str: str) -> str:
+    """根据开始和结束时间字符串计算持续时长。"""
+    if not start_time_str or not end_time_str:
+        return "未知"
+    try:
+        start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+        end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+        
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+        
+        if end_time < start_time:
+            return "计算错误"
+
+        delta = end_time - start_time
+        days = delta.days
+        seconds = delta.seconds
+        hours, remainder = divmod(seconds, 3600)
+        minutes, _ = divmod(remainder, 60)
+        
+        parts = []
+        if days > 0: parts.append(f"{days}天")
+        if hours > 0: parts.append(f"{hours}小时")
+        if minutes > 0: parts.append(f"{minutes}分")
+        
+        if not parts and delta.total_seconds() > 0: return "不到1分钟"
+        if not parts: return "0秒"
+        return "".join(parts)
+    except (ValueError, TypeError):
+        return "未知"
+
 def create_title_bar(title: str) -> List[InlineKeyboardButton]:
     return [InlineKeyboardButton(f"❖ {title} ❖", callback_data="ignore")]
 
-# --- 修改点 1: 调整页脚函数，使其能接收参数，并且默认不显示关闭按钮 ---
 def get_footer_ruler(add_close_button: bool = False) -> List[List[InlineKeyboardButton]]:
-    """
-    生成菜单页脚。
-    :param add_close_button: 如果为 True，则在底部添加“关闭窗口”按钮。
-    """
     footer = [
         [
             InlineKeyboardButton("─────« Cloud", callback_data="ignore"),
@@ -121,7 +149,7 @@ async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, tas
         retries += 1
     await context.bot.send_message(chat_id=chat_id, text=f"🔔 *任务超时*\n\n任务 `{task_name}` 轮询超时（超过10分钟），请在网页端查看最终结果。")
 
-# --- 菜单构建函数 (已全部更新为使用新的页脚) ---
+# --- 菜单构建函数 ---
 async def build_param_selection_menu(form_data: dict, action_type: str, context: ContextTypes.DEFAULT_TYPE):
     shape = form_data.get('shape')
     is_flex = shape and "Flex" in shape
@@ -189,7 +217,7 @@ async def build_main_menu():
         if i + 1 < len(profiles):
             row.append(InlineKeyboardButton(profiles[i+1], callback_data=f"account:{profiles[i+1]}"))
         keyboard.append(row)
-    keyboard.extend(get_footer_ruler(add_close_button=True)) # 只在主菜单显示关闭按钮
+    keyboard.extend(get_footer_ruler(add_close_button=True))
     return InlineKeyboardMarkup(keyboard), "请选择要操作的 OCI 账户:"
 
 async def build_account_menu(alias: str, context: ContextTypes.DEFAULT_TYPE):
@@ -253,8 +281,6 @@ def build_pagination_keyboard(view: str, current_page: int, total_pages: int) ->
     keyboard.extend(get_footer_ruler(add_close_button=False))
     return keyboard
 
-# 在 bot.py 中
-
 async def show_all_tasks(query: Update.callback_query, view: str = 'running', page: int = 1):
     await query.edit_message_text(text="*正在查询所有抢占任务...*", parse_mode=ParseMode.MARKDOWN)
     try:
@@ -293,44 +319,48 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                 try:
                     result_data = json.loads(result_str)
                     details = result_data.get('details', {})
-                    # --- ✅ 修复 #1: 将 'alias' 修改为 'account_alias' ---
                     alias = f"账号：{task.get('account_alias', 'N/A')}"
                     shape = details.get('shape', '')
                     shape_type = "ARM" if "A1" in shape else "AMD"
                     
-                    # --- ✨ 新增的修正逻辑 开始 ✨ ---
                     ocpus = details.get('ocpus')
                     memory_in_gbs = details.get('memory_in_gbs')
-                    boot_volume_size = details.get('boot_volume_size', 50) # 使用数字50作为默认值
+                    boot_volume_size = details.get('boot_volume_size', 50)
                     
                     if 'E2.1.Micro' in shape:
                         ocpus = ocpus or 1
                         memory_in_gbs = memory_in_gbs or 1
-                    # --- ✨ 新增的修正逻辑 结束 ✨ ---
 
                     specs = f"{ocpus} Ocpu / {memory_in_gbs} GB / {boot_volume_size} GB"
                     elapsed_time = format_elapsed_time_tg(result_data.get('start_time'))
-                    attempt = f"【{result_data.get('attempt_count', 'N/A')}次】"
+                    
+                    # --- ✨ 这里是唯一的修改点 ✨ ---
+                    attempt_count = result_data.get('attempt_count', 'N/A')
                     text += (f"🏃 *{task.get('name', 'N/A')}*\n"
                              f"{alias}\n"
                              f"机型：{shape_type}\n"
                              f"参数：{specs}\n"
-                             f"用时：{elapsed_time}{attempt}\n\n")
+                             f"次数：{attempt_count} 次\n"
+                             f"用时：{elapsed_time}\n\n")
                 except (json.JSONDecodeError, TypeError):
                     text += f"_{task.get('account_alias', 'N/A')}: {task.get('name', 'N/A')} - {result_str or '获取状态中...'}\n\n_"
             elif view == 'completed':
                 status_icon = "✅" if task.get("status") == "success" else "❌"
-                # --- ✅ 修复 #1 (同样应用于此): 将 'alias' 修改为 'account_alias' ---
                 task_alias = task.get('account_alias', 'N/A')
                 task_name = task.get('name', 'N/A')
                 
+                duration_text = ""
+                start_time = task.get('created_at')
+                end_time = task.get('completed_at')
+                if start_time and end_time:
+                    duration_text = f"总用时: {format_duration_tg(start_time, end_time)}\n"
+
                 original_result = task.get('result', '无结果')
                 lines = original_result.split('\n')
                 filtered_lines = [line for line in lines if '可用区' not in line]
                 full_result = '\n'.join(filtered_lines)
 
                 param_text = ""
-                # 这部分逻辑用于解析可能存在的旧任务格式中的 details
                 details_str = task.get('details') 
                 details = {}
                 if details_str and isinstance(details_str, str):
@@ -344,7 +374,6 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                         shape = details.get('shape', '')
                         shape_type = "ARM" if "A1" in shape else "AMD"
                         
-                        # --- ✨ 新增的修正逻辑 开始 ✨ ---
                         ocpus = details.get('ocpus')
                         memory_in_gbs = details.get('memory_in_gbs')
                         boot_volume_size = details.get('boot_volume_size', 50)
@@ -352,14 +381,13 @@ async def show_all_tasks(query: Update.callback_query, view: str = 'running', pa
                         if 'E2.1.Micro' in shape:
                             ocpus = ocpus or 1
                             memory_in_gbs = memory_in_gbs or 1
-                        # --- ✨ 新增的修正逻辑 结束 ✨ ---
 
-                        specs = f"{ocpus}ocpu/{memory_in_gbs}GB/{boot_volume_size}GB"
+                        specs = f"{ocpus} Ocpu / {memory_in_gbs} GB / {boot_volume_size} GB"
                         param_text = f"机型：{shape_type}\n参数：{specs}\n"
                     except Exception as e:
                         logger.warning(f"无法格式化已完成任务的参数: {e}")
                         param_text = ""
-                text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{param_text}{full_result}\n\n"
+                text += f"{status_icon} *{task_name}* (_{task_alias}_)\n{param_text}{duration_text}{full_result}\n\n"
     reply_markup = InlineKeyboardMarkup(build_pagination_keyboard(view, page, total_pages))
     try:
         await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN, disable_web_page_preview=True)
@@ -544,20 +572,11 @@ async def submit_form(update: Update, context: ContextTypes.DEFAULT_TYPE, form_d
     reply_markup, text = await build_account_menu(alias, context)
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
-# --- 修改点 2: 彻底修正左下角菜单按钮的行为 ---
 async def post_init(application: Application):
-    """
-    在机器人启动后，设置其命令和菜单按钮。
-    """
-    # 1. 定义一个对用户可见的命令列表
     commands = [
-        BotCommand("start", "主菜单")  # 将描述文字直接放在这里
+        BotCommand("start", "主菜单")
     ]
     await application.bot.set_my_commands(commands)
-    
-    #    将左下角的菜单按钮明确设置为默认类型。
-    #    这会告诉客户端显示一个通用的菜单图标 (≡)，
-    #    点击后，由于我们只有一个命令，它会直接发送 /start
     await application.bot.set_chat_menu_button(menu_button=MenuButtonDefault())
 
 def main() -> None:
