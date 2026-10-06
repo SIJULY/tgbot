@@ -36,7 +36,8 @@ install_bot() {
     echo -e "\n${YELLOW}请根据提示输入您的配置信息 (这些信息可以从您的面板获取):${NC}"
     read -p "➡️ 请输入您的面板URL (例如: https://xxxxx.com): " PANEL_URL
     read -p "➡️ 请输入您的面板API密钥 (TG Bot 助手 API 密钥): " PANEL_API_KEY
-    read -p "➡️ 请输入您的Telegram机器人TOKEN: " BOT_TOKEN
+    read -s -p "➡️ 请输入您的Telegram机器人TOKEN: " BOT_TOKEN
+    echo
     read -p "➡️ 请输入您的Telegram用户ID (纯数字): " AUTHORIZED_USER_IDS
 
     # 2. 安装系统依赖
@@ -103,6 +104,8 @@ EOF
     echo -e "  - 查看状态: ${GREEN}systemctl status tgbot${NC}"
     echo -e "  - 重启服务: ${GREEN}systemctl restart tgbot${NC}"
     echo -e "  - 查看日志: ${GREEN}journalctl -u tgbot -f --no-pager${NC}"
+    echo -e "\n${YELLOW}提示：同一个 Telegram Bot Token 只能有一个程序使用 polling/getUpdates。${NC}"
+    echo -e "${YELLOW}如果日志出现 409 Conflict，请检查是否有其他机器人实例或旧 token 仍在运行。${NC}"
 }
 
 # ==========================================

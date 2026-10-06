@@ -75,6 +75,21 @@ bash <(curl -sL https://raw.githubusercontent.com/SIJULY/tgbot/main/install_tgbo
 
 安装完成后，所有配置信息将保存在 `/opt/tgbot/bot.py` 文件中，您可以随时修改并重启服务。
 
+## 🔒 运行与安全注意事项
+
+-   **不要公开 Bot Token**：如果 Token 曾经出现在聊天、截图或日志中，请立即在 BotFather 重新生成 Token，并更新 `/opt/tgbot/bot.py` 后重启服务。
+-   **只保留一个 polling 实例**：同一个 Telegram Bot Token 只能有一个程序调用 `getUpdates` / `run_polling`。多个服务可以共用 Token 发送消息，但不能同时监听消息。
+-   **409 Conflict 排查**：如果按钮响应变慢，日志中出现 `Conflict: terminated by other getUpdates request`，说明还有其他程序正在使用同一个 Token 轮询更新。请停止旧 bot、容器内 bot 或其他部署位置的 bot；必要时更换 Token。
+-   **日志保护**：程序已将 `httpx` 日志级别调高，避免 INFO 日志输出完整 Telegram Bot API URL，从而降低 Token 泄露风险。
+
+常用检查命令：
+
+```bash
+systemctl status tgbot --no-pager
+journalctl -u tgbot -n 100 --no-pager
+journalctl -u tgbot -f --no-pager
+```
+
 ---
 
 希望这份文档能帮助您更好地了解和使用这个项目！
