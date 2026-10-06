@@ -21,6 +21,7 @@ TASKS_PER_PAGE = 2
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 # --- 辅助函数 ---
 def natural_sort_key(s: str):
     return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
@@ -91,6 +92,25 @@ def get_footer_ruler(add_close_button: bool = False) -> List[List[InlineKeyboard
         footer.append([InlineKeyboardButton("❌ 关闭窗口", callback_data="close_window")])
     return footer
 
+def _format_instance_number(value: Any) -> str:
+    """格式化实例配置中的数字，避免 Telegram 菜单里显示 1.0 这类冗余小数。"""
+    if value in (None, "", "N/A", "无"):
+        return "N/A"
+    try:
+        number = float(value)
+        return str(int(number)) if number.is_integer() else str(number)
+    except (TypeError, ValueError):
+        return str(value)
+
+def format_instance_config_text(instance: Dict[str, Any]) -> str:
+    ocpus = _format_instance_number(instance.get('ocpus'))
+    memory = _format_instance_number(instance.get('memory_in_gbs'))
+    disk = instance.get('boot_volume_size_gb') or instance.get('boot_volume_size') or "N/A"
+    disk_text = str(disk).strip()
+    if disk_text not in ("N/A", "无") and "GB" not in disk_text.upper():
+        disk_text = f"{_format_instance_number(disk_text)} GB"
+    return f"⚙️ 参数：{ocpus} CPU / {memory} GB RAM / {disk_text} 硬盘"
+
 # --- API 客户端  ---
 BASE_URL = f"{PANEL_URL}/api/v1/oci"
 HEADERS = {"Authorization": f"Bearer {PANEL_API_KEY}", "Content-Type": "application/json"}
@@ -130,7 +150,7 @@ async def send_and_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: i
     except Exception as e:
         logger.warning(f"发送或删除临时消息时出错: {e}")
 
-async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, task_id: str, task_name: str):
+async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, task_id: str, task_name: str, action: str = None, old_ip: str = None):
     max_retries, retries = 120, 0
     while retries < max_retries:
         await asyncio.sleep(5)
@@ -140,6 +160,13 @@ async def poll_task_status(chat_id: int, context: ContextTypes.DEFAULT_TYPE, tas
             continue
         status = result.get("status")
         if status == "success":
+            if action == "CHANGEIP":
+                task_result = result.get('result') or '更换完成，但未返回详细结果。'
+                final_message = f"🔔 *更换IP完成*\n\n*任务名称*: `{task_name}`\n"
+                if old_ip:
+                    final_message += f"*当前IP*: `{old_ip}`\n"
+                final_message += f"\n*结果*:\n{task_result}"
+                await context.bot.send_message(chat_id=chat_id, text=final_message, parse_mode=ParseMode.MARKDOWN)
             logger.info(f"任务 {task_id} ({task_name}) 成功，由后端处理通知，机器人轮询结束。")
             return
         if status == "failure":
@@ -246,14 +273,22 @@ async def build_account_menu(alias: str, context: ContextTypes.DEFAULT_TYPE):
     keyboard.extend(get_footer_ruler(add_close_button=False))
     return InlineKeyboardMarkup(keyboard), f"已选择账户: *{alias}*\n请选择功能模块或下方的一个实例:"
 
-async def build_instance_action_menu(alias: str):
+async def build_instance_action_menu(alias: str, instance: Dict[str, Any] = None):
     keyboard = [
         create_title_bar("实例操作"),
+    ]
+    if instance:
+        public_ip = instance.get('public_ip') or "无"
+        keyboard.extend([
+            [InlineKeyboardButton(f"🌐 IP：{public_ip}", callback_data="ignore")],
+            [InlineKeyboardButton(format_instance_config_text(instance), callback_data="ignore")],
+        ])
+    keyboard.extend([
         [InlineKeyboardButton("✅ 开机", callback_data="perform_action:START"), InlineKeyboardButton("🛑 关机", callback_data="perform_action:STOP")],
         [InlineKeyboardButton("🔄 重启", callback_data="perform_action:RESTART"), InlineKeyboardButton("🗑️ 终止", callback_data="perform_action:TERMINATE")],
         [InlineKeyboardButton("🌐 更换IP", callback_data="perform_action:CHANGEIP"), InlineKeyboardButton("🌐 分配IPv6", callback_data="perform_action:ASSIGNIPV6")],
         [InlineKeyboardButton("⬅️ 返回", callback_data=f"back:account:{alias}")],
-    ]
+    ])
     keyboard.extend(get_footer_ruler(add_close_button=False))
     return InlineKeyboardMarkup(keyboard), "请选择要执行的操作："
 
@@ -463,7 +498,11 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
                 asyncio.create_task(send_and_delete_message(context, chat_id, warning_text))
                 return
         else:
-            feedback_text = f"✅ *{action_text}* 命令已发送..."
+            if action == "CHANGEIP":
+                current_ip = selected_instance.get('public_ip') or "无"
+                feedback_text = f"✅ *{action_text}* 命令已发送...\n\n当前IP: `{current_ip}`\n正在等待新IP分配..."
+            else:
+                feedback_text = f"✅ *{action_text}* 命令已发送..."
             asyncio.create_task(send_and_delete_message(context, chat_id, feedback_text))
         
         instance_id, instance_name, vnic_id = selected_instance['id'], selected_instance['display_name'], selected_instance.get('vnic_id')
@@ -471,7 +510,8 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if vnic_id: payload['vnic_id'] = vnic_id
         result = await api_request("POST", f"{alias}/instance-action", json=payload)
         if result and result.get("task_id"):
-            asyncio.create_task(poll_task_status(chat_id, context, result.get("task_id"), f"{action} on {instance_name}"))
+            old_ip = selected_instance.get('public_ip') if action == "CHANGEIP" else None
+            asyncio.create_task(poll_task_status(chat_id, context, result.get("task_id"), f"{action} on {instance_name}", action=action, old_ip=old_ip))
         else:
             asyncio.create_task(send_and_delete_message(context, chat_id, f"❌ 命令发送失败: {result.get('error', '未知错误')}"))
         return
@@ -518,7 +558,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
             return
         selected_instance = instance_list[instance_index]
         context.user_data['selected_instance_for_action'] = selected_instance
-        reply_markup, text = await build_instance_action_menu(alias)
+        reply_markup, text = await build_instance_action_menu(alias, selected_instance)
         await query.edit_message_text(f"已选择实例: *{selected_instance['display_name']}*\n请选择要执行的操作：", reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
         return
     
@@ -584,7 +624,11 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CallbackQueryHandler(button_callback_handler))
     logger.info("Bot 启动成功！")
-    application.run_polling()
+    application.run_polling(
+        poll_interval=1.0,
+        timeout=10,
+        drop_pending_updates=True,
+    )
 
 if __name__ == "__main__":
     main()
